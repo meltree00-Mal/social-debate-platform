@@ -1470,7 +1470,7 @@ function App() {
       <div className="home-logo-wrap">
         <img
           className="home-logo"
-          src="/social-duixian-logo.jpg"
+          src="/social-duixian-logo.png"
           alt="社交对线平台 Logo"
         />
       </div>
