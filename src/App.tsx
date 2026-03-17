@@ -4,6 +4,7 @@ import './App.css'
 interface User {
   id: number;
   name: string;
+  email: string;
   password: string;
   isAdmin: boolean;
   isActive: boolean;
@@ -41,6 +42,7 @@ interface Market {
   id: number;
   question: string;
   tag: '政治' | '经济' | '生活';
+  createdAt: number;
   participants: string[];
   followers: string[];
   voteRecords: {
@@ -78,8 +80,8 @@ interface Feedback {
 }
 
 const initialMarkets: Market[] = [
-  { id: 1, question: "Will it rain tomorrow?", tag: '生活', participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-20" },
-  { id: 2, question: "Will the stock market go up next week?", tag: '经济', participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-21" },
+  { id: 1, question: "Will it rain tomorrow?", tag: '生活', createdAt: Date.now() - 2 * 60 * 1000, participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-20" },
+  { id: 2, question: "Will the stock market go up next week?", tag: '经济', createdAt: Date.now() - 1 * 60 * 1000, participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-21" },
 ];
 
 const calculatePrices = (market: Market) => {
@@ -107,6 +109,9 @@ function App() {
     id: typeof market.id === 'number' ? market.id : Date.now(),
     question: typeof market.question === 'string' ? market.question : 'Untitled prediction',
     tag: market.tag === '政治' || market.tag === '经济' || market.tag === '生活' ? market.tag : '生活',
+    createdAt: typeof market.createdAt === 'number'
+      ? market.createdAt
+      : (typeof market.id === 'number' ? market.id : Date.now()),
     participants: Array.isArray(market.participants)
       ? market.participants.filter((name): name is string => typeof name === 'string')
       : [],
@@ -202,6 +207,7 @@ function App() {
     return {
       id: typeof user.id === 'number' ? user.id : Date.now(),
       name: typeof user.name === 'string' ? user.name : `user-${Date.now()}`,
+      email: typeof user.email === 'string' ? user.email : '',
       password: typeof user.password === 'string' ? user.password : '',
       isAdmin: Boolean(user.isAdmin) || (typeof user.name === 'string' && user.name.trim().toLowerCase() === 'admin'),
       isActive: typeof user.isActive === 'boolean' ? user.isActive : true,
@@ -224,6 +230,7 @@ function App() {
   const [loginName, setLoginName] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [newQuestion, setNewQuestion] = useState('');
@@ -282,6 +289,10 @@ function App() {
       return [];
     }
   });
+  const [publicAnnouncement, setPublicAnnouncement] = useState(() => localStorage.getItem('publicAnnouncement') ?? '欢迎来到社交对线平台内测，欢迎提出改进建议。');
+  const [testInviteCode, setTestInviteCode] = useState(() => localStorage.getItem('testInviteCode') ?? '');
+  const [announcementDraft, setAnnouncementDraft] = useState(() => localStorage.getItem('publicAnnouncement') ?? '欢迎来到社交对线平台内测，欢迎提出改进建议。');
+  const [inviteCodeDraft, setInviteCodeDraft] = useState(() => localStorage.getItem('testInviteCode') ?? '');
   const [markets, setMarkets] = useState<Market[]>(() => {
     const saved = localStorage.getItem('markets');
     if (saved) {
@@ -300,6 +311,14 @@ function App() {
   }, [users]);
 
   useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('currentUserName', currentUser.name);
+    } else {
+      localStorage.removeItem('currentUserName');
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
     localStorage.setItem('markets', JSON.stringify(markets));
   }, [markets]);
 
@@ -310,6 +329,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('feedbacks', JSON.stringify(feedbacks));
   }, [feedbacks]);
+
+  useEffect(() => {
+    localStorage.setItem('publicAnnouncement', publicAnnouncement);
+  }, [publicAnnouncement]);
+
+  useEffect(() => {
+    localStorage.setItem('testInviteCode', testInviteCode);
+  }, [testInviteCode]);
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -327,8 +354,57 @@ function App() {
     return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
 
+  useEffect(() => {
+    if (currentUser) return;
+    const savedLoginName = localStorage.getItem('currentUserName');
+    if (!savedLoginName) return;
+
+    const matchedUser = users.find(u => u.name.trim().toLowerCase() === savedLoginName.trim().toLowerCase());
+    if (matchedUser?.isActive) {
+      setCurrentUser(matchedUser);
+      return;
+    }
+
+    localStorage.removeItem('currentUserName');
+  }, [users, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const latestUser = users.find(user => user.id === currentUser.id);
+    if (!latestUser) {
+      setCurrentUser(null);
+      return;
+    }
+
+    if (!latestUser.isActive) {
+      setCurrentUser(null);
+      localStorage.removeItem('currentUserName');
+      alert('This account has been deactivated by admin.');
+      return;
+    }
+
+    if (
+      latestUser.name !== currentUser.name
+      || latestUser.password !== currentUser.password
+      || latestUser.credit !== currentUser.credit
+      || latestUser.email !== currentUser.email
+      || latestUser.isAdmin !== currentUser.isAdmin
+    ) {
+      setCurrentUser(latestUser);
+    }
+  }, [users, currentUser]);
+
   const login = () => {
-    const user = users.find(u => u.name === loginName && u.password === loginPassword);
+    const normalizedName = loginName.trim().toLowerCase();
+    const normalizedPassword = loginPassword.trim();
+
+    if (!normalizedName || !normalizedPassword) {
+      alert('Please enter username and password');
+      return;
+    }
+
+    const user = users.find(u => u.name.trim().toLowerCase() === normalizedName && u.password === normalizedPassword);
     if (user) {
       if (!user.isActive) {
         alert('This account has been deactivated by admin.');
@@ -338,17 +414,56 @@ function App() {
       setLoginName('');
       setLoginPassword('');
     } else {
+      // Bootstrap an admin account for prototype environments when no admin exists yet.
+      if (normalizedName === 'admin' && !users.some(u => u.isAdmin)) {
+        const adminUser: User = {
+          id: Date.now(),
+          name: 'Admin',
+          email: '',
+          password: normalizedPassword,
+          isAdmin: true,
+          isActive: true,
+          credit: legacyBalance,
+          creditHistory: [{
+            id: Date.now(),
+            delta: legacyBalance,
+            reason: 'Initial credit',
+            balanceAfter: legacyBalance,
+            createdAt: Date.now(),
+          }],
+        };
+        setUsers(prev => [...prev, adminUser]);
+        setCurrentUser(adminUser);
+        setLoginName('');
+        setLoginPassword('');
+        alert('Admin account has been created automatically.');
+        return;
+      }
       alert('Invalid credentials');
     }
   };
 
   const register = () => {
-    if (registerName.trim() && registerPassword.trim() && !users.find(u => u.name === registerName)) {
-      const isAdmin = registerName.trim().toLowerCase() === 'admin';
+    const normalizedName = registerName.trim();
+    const normalizedEmail = registerEmail.trim().toLowerCase();
+    const normalizedPassword = registerPassword.trim();
+    const nameKey = normalizedName.toLowerCase();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const hasSameName = users.some(u => u.name.trim().toLowerCase() === nameKey);
+    const hasSameEmail = users.some(u => u.email.trim().toLowerCase() === normalizedEmail);
+
+    if (!emailPattern.test(normalizedEmail)) {
+      alert('Please enter a valid email address');
+      return;
+    }
+
+    if (normalizedName && normalizedPassword && !hasSameName && !hasSameEmail) {
+      const isAdmin = nameKey === 'admin';
       const user: User = {
         id: Date.now(),
-        name: registerName.trim(),
-        password: registerPassword.trim(),
+        name: normalizedName,
+        email: normalizedEmail,
+        password: normalizedPassword,
         isAdmin,
         isActive: true,
         credit: legacyBalance,
@@ -363,9 +478,10 @@ function App() {
       setUsers(prev => [...prev, user]);
       setCurrentUser(user);
       setRegisterName('');
+      setRegisterEmail('');
       setRegisterPassword('');
     } else {
-      alert('Username taken or invalid');
+      alert('Username/email taken or invalid');
     }
   };
 
@@ -542,6 +658,13 @@ function App() {
     setFeedbacks(prev => prev.filter(f => f.id !== feedbackId));
   };
 
+  const saveTestingNotice = () => {
+    if (!currentUser?.isAdmin) return;
+    setPublicAnnouncement(announcementDraft.trim());
+    setTestInviteCode(inviteCodeDraft.trim());
+    alert('测试公告已更新。');
+  };
+
   const publishMarket = () => {
     if (currentUser && newQuestion.trim() && newDeadline) {
       if (currentUser.credit < PREDICTION_PUBLISH_FEE) {
@@ -555,6 +678,7 @@ function App() {
         id: Date.now(),
         question: newQuestion.trim(),
         tag: newTag,
+        createdAt: Date.now(),
         participants: [],
         followers: [],
         voteRecords: [],
@@ -567,7 +691,7 @@ function App() {
         creator: currentUser.name,
         deadline: newDeadline,
       };
-      setMarkets(prev => [...prev, newMarket]);
+      setMarkets(prev => [newMarket, ...prev]);
       setNewQuestion('');
       setNewTag('政治');
       setNewDeadline('');
@@ -681,7 +805,7 @@ function App() {
         createdAt: Date.now(),
         ratings: [],
       };
-      setSecrets(prev => [...prev, secret]);
+      setSecrets(prev => [secret, ...prev]);
       setNewTitle('');
       setNewSecret('');
       setNewSecretImage(null);
@@ -1128,7 +1252,7 @@ function App() {
       if (leftPinned && rightPinned) {
         return (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0);
       }
-      return new Date(left.deadline).getTime() - new Date(right.deadline).getTime();
+      return right.createdAt - left.createdAt;
     });
 
   const resetMarketFilters = () => {
@@ -1219,7 +1343,7 @@ function App() {
           <div key={user.id} className="admin-user-row">
             <div className="admin-user-info">
               <strong>{user.name}</strong>
-              <span>{user.isAdmin ? '管理员' : '普通用户'} | {user.isActive ? '已激活' : '已停用'} | Credit: {user.credit.toFixed(2)}</span>
+              <span>{user.email || '未绑定邮箱'} | {user.isAdmin ? '管理员' : '普通用户'} | {user.isActive ? '已激活' : '已停用'} | Credit: {user.credit.toFixed(2)}</span>
             </div>
             <div className="admin-user-actions">
               <button onClick={() => toggleUserActive(user)}>{user.isActive ? '停用账号' : '激活账号'}</button>
@@ -1302,9 +1426,54 @@ function App() {
     );
   };
 
+  const renderTestingNoticePanel = () => (
+    <div className="testing-notice-panel">
+      <h3>测试邀请码与公告</h3>
+      <p className="hint">管理员可在这里维护给测试用户看的公告和邀请码。</p>
+      <div className="testing-notice-form">
+        <textarea
+          value={announcementDraft}
+          onChange={(e) => setAnnouncementDraft(e.target.value)}
+          rows={4}
+          placeholder="输入测试公告"
+        />
+        <input
+          type="text"
+          value={inviteCodeDraft}
+          onChange={(e) => setInviteCodeDraft(e.target.value)}
+          placeholder="输入测试邀请码（可选）"
+        />
+        <button onClick={saveTestingNotice}>保存公告</button>
+      </div>
+    </div>
+  );
+
+  const renderPublicTestingNotice = () => {
+    if (!publicAnnouncement.trim() && !testInviteCode.trim()) return null;
+    return (
+      <div className="public-testing-notice">
+        <h3>测试公告</h3>
+        {publicAnnouncement.trim() && <p>{publicAnnouncement}</p>}
+        {testInviteCode.trim() && (
+          <div className="invite-code-row">
+            <span>测试邀请码</span>
+            <strong>{testInviteCode}</strong>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={`app${activeTab === 'secret' ? ' secret-mode' : ''}`}>
       <h1>社交对线平台</h1>
+      <div className="home-logo-wrap">
+        <img
+          className="home-logo"
+          src="/social-duixian-logo.jpg"
+          alt="社交对线平台 Logo"
+        />
+      </div>
       {!currentUser ? (
         <div className="auth">
           <h2>{isLogin ? 'Login' : 'Register'}</h2>
@@ -1333,6 +1502,12 @@ function App() {
                 placeholder="Username"
                 value={registerName}
                 onChange={(e) => setRegisterName(e.target.value)}
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={registerEmail}
+                onChange={(e) => setRegisterEmail(e.target.value)}
               />
               <input
                 type="password"
@@ -1395,6 +1570,7 @@ function App() {
               <button className={activeTab === 'admin' ? 'active' : ''} onClick={() => setActiveTab('admin')}>管理员</button>
             )}
           </div>
+          {renderPublicTestingNotice()}
           {showRecharge && (
             <div className="recharge-modal">
               <h3>Recharge Crypo points</h3>
@@ -1514,6 +1690,7 @@ function App() {
             <div className="publish">
               <h2>管理员控制台</h2>
               <p className="hint">你可以在这里管理用户权限、账号状态和用户反馈。</p>
+              {renderTestingNoticePanel()}
               {renderAdminUserManagement()}
               {renderFeedbackManagement()}
             </div>

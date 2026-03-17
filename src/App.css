@@ -32,6 +32,19 @@ h1 {
   letter-spacing: -0.02em;
 }
 
+.home-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin: -6px 0 18px;
+}
+
+.home-logo {
+  width: min(300px, 75vw);
+  border-radius: 50%;
+  border: 2px solid #cc8e4f;
+  box-shadow: 0 10px 24px rgba(24, 22, 18, 0.24);
+}
+
 .header,
 .auth,
 .publish,
@@ -136,6 +149,77 @@ h1 {
   letter-spacing: 0.02em;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
   padding: 12px 16px;
+}
+
+.public-testing-notice {
+  margin: -6px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #d8ccb7;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff8e6 0%, #fff3d3 100%);
+  box-shadow: 0 2px 0 rgba(76, 60, 33, 0.08);
+}
+
+.public-testing-notice h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: #5f4a24;
+}
+
+.public-testing-notice p {
+  margin: 0;
+  color: #6a5530;
+  line-height: 1.5;
+}
+
+.invite-code-row {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed #b99c58;
+  background: rgba(255, 251, 238, 0.9);
+}
+
+.invite-code-row span {
+  font-size: 12px;
+  color: #866b36;
+}
+
+.invite-code-row strong {
+  color: #2f2411;
+  letter-spacing: 0.08em;
+}
+
+.testing-notice-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #ddd0b8;
+  background: #fffaf0;
+}
+
+.testing-notice-panel h3 {
+  margin: 0 0 6px;
+}
+
+.testing-notice-form {
+  display: grid;
+  gap: 10px;
+}
+
+.testing-notice-form textarea,
+.testing-notice-form input {
+  width: 100%;
+  border: 1px solid #d8ccb7;
+  border-radius: 10px;
+  background: #fffef9;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--club-ink);
 }
 
 .tabs button.active {
