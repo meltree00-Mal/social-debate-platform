@@ -39,8 +39,11 @@ h1 {
 }
 
 .home-logo {
-  width: min(300px, 75vw);
-  border-radius: 50%;
+  width: min(360px, 84vw);
+  max-height: 360px;
+  object-fit: contain;
+  background: #fffdf8;
+  border-radius: 20px;
   border: 2px solid #cc8e4f;
   box-shadow: 0 10px 24px rgba(24, 22, 18, 0.24);
 }
