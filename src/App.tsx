@@ -226,7 +226,12 @@ function App() {
       return [];
     }
   });
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const savedLoginName = localStorage.getItem('currentUserName');
+    if (!savedLoginName) return null;
+    const matchedUser = users.find(user => user.name.trim().toLowerCase() === savedLoginName.trim().toLowerCase());
+    return matchedUser?.isActive ? matchedUser : null;
+  });
   const [loginName, setLoginName] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
@@ -293,6 +298,7 @@ function App() {
   const [testInviteCode, setTestInviteCode] = useState(() => localStorage.getItem('testInviteCode') ?? '');
   const [announcementDraft, setAnnouncementDraft] = useState(() => localStorage.getItem('publicAnnouncement') ?? '欢迎来到社交对线平台内测，欢迎提出改进建议。');
   const [inviteCodeDraft, setInviteCodeDraft] = useState(() => localStorage.getItem('testInviteCode') ?? '');
+  const [siteLogoUrl, setSiteLogoUrl] = useState(() => localStorage.getItem('siteLogoUrl') ?? '/social-duixian-logo.png');
   const [markets, setMarkets] = useState<Market[]>(() => {
     const saved = localStorage.getItem('markets');
     if (saved) {
@@ -339,6 +345,10 @@ function App() {
   }, [testInviteCode]);
 
   useEffect(() => {
+    localStorage.setItem('siteLogoUrl', siteLogoUrl);
+  }, [siteLogoUrl]);
+
+  useEffect(() => {
     const syncFromHash = () => {
       const match = window.location.hash.match(/^#\/prediction\/(\d+)$/);
       if (match) {
@@ -353,20 +363,6 @@ function App() {
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
-
-  useEffect(() => {
-    if (currentUser) return;
-    const savedLoginName = localStorage.getItem('currentUserName');
-    if (!savedLoginName) return;
-
-    const matchedUser = users.find(u => u.name.trim().toLowerCase() === savedLoginName.trim().toLowerCase());
-    if (matchedUser?.isActive) {
-      setCurrentUser(matchedUser);
-      return;
-    }
-
-    localStorage.removeItem('currentUserName');
-  }, [users, currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -663,6 +659,20 @@ function App() {
     setPublicAnnouncement(announcementDraft.trim());
     setTestInviteCode(inviteCodeDraft.trim());
     alert('测试公告已更新。');
+  };
+
+  const handleSiteLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setSiteLogoUrl(reader.result);
+        alert('首页图片已更新。');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const publishMarket = () => {
@@ -1444,6 +1454,11 @@ function App() {
           placeholder="输入测试邀请码（可选）"
         />
         <button onClick={saveTestingNotice}>保存公告</button>
+        <label>
+          上传首页图片
+          <input type="file" accept="image/*" onChange={handleSiteLogoUpload} />
+        </label>
+        <button onClick={() => setSiteLogoUrl('/social-duixian-logo.png')}>恢复默认图片</button>
       </div>
     </div>
   );
@@ -1470,7 +1485,7 @@ function App() {
       <div className="home-logo-wrap">
         <img
           className="home-logo"
-          src="/social-duixian-logo.png"
+          src={siteLogoUrl}
           alt="社交对线平台 Logo"
         />
       </div>
