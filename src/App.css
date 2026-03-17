@@ -40,11 +40,24 @@ h1 {
 
 .home-logo {
   width: min(320px, 80vw);
-  aspect-ratio: 1 / 1;
+  height: min(320px, 80vw);
+  display: block;
   object-fit: cover;
+  object-position: center;
   border-radius: 50%;
   border: 2px solid #cc8e4f;
   box-shadow: 0 10px 24px rgba(24, 22, 18, 0.24);
+}
+
+@media (max-width: 640px) {
+  .home-logo-wrap {
+    margin: 0 0 12px;
+  }
+
+  .home-logo {
+    width: min(240px, 68vw);
+    height: min(240px, 68vw);
+  }
 }
 
 .header,
