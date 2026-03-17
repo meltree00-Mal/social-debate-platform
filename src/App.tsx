@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import { supabase, isSupabaseEnabled } from './lib/supabase'
 
 interface User {
   id: number;
@@ -79,6 +80,16 @@ interface Feedback {
   status: 'unread' | 'read';
 }
 
+interface SharedAppState {
+  users: User[];
+  markets: Market[];
+  secrets: Secret[];
+  feedbacks: Feedback[];
+  publicAnnouncement: string;
+  testInviteCode: string;
+  siteLogoUrl: string;
+}
+
 const initialMarkets: Market[] = [
   { id: 1, question: "Will it rain tomorrow?", tag: '生活', createdAt: Date.now() - 2 * 60 * 1000, participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-20" },
   { id: 2, question: "Will the stock market go up next week?", tag: '经济', createdAt: Date.now() - 1 * 60 * 1000, participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-21" },
@@ -105,6 +116,9 @@ const MARKET_VOTE_COST = 1;
 const MARKET_VOTE_LIMIT = 5;
 
 function App() {
+  const remoteHydratingRef = useRef(false);
+  const remoteSavingRef = useRef(false);
+
   const normalizeMarket = (market: Partial<Market>): Market => ({
     id: typeof market.id === 'number' ? market.id : Date.now(),
     question: typeof market.question === 'string' ? market.question : 'Untitled prediction',
@@ -312,6 +326,53 @@ function App() {
     return m;
   });
 
+  const applySharedState = (data: Partial<SharedAppState>) => {
+    remoteHydratingRef.current = true;
+
+    if (Array.isArray(data.users)) {
+      setUsers(data.users.map(normalizeUser));
+    }
+    if (Array.isArray(data.markets)) {
+      const nextMarkets = data.markets.map(normalizeMarket);
+      nextMarkets.forEach((market: Market) => calculatePrices(market));
+      setMarkets(nextMarkets);
+    }
+    if (Array.isArray(data.secrets)) {
+      setSecrets(data.secrets.map(normalizeSecret));
+    }
+    if (Array.isArray(data.feedbacks)) {
+      setFeedbacks(data.feedbacks as Feedback[]);
+    }
+    if (typeof data.publicAnnouncement === 'string') {
+      setPublicAnnouncement(data.publicAnnouncement);
+      setAnnouncementDraft(data.publicAnnouncement);
+    }
+    if (typeof data.testInviteCode === 'string') {
+      setTestInviteCode(data.testInviteCode);
+      setInviteCodeDraft(data.testInviteCode);
+    }
+    if (typeof data.siteLogoUrl === 'string' && data.siteLogoUrl.trim()) {
+      setSiteLogoUrl(data.siteLogoUrl);
+    }
+
+    window.setTimeout(() => {
+      remoteHydratingRef.current = false;
+    }, 0);
+  };
+
+  const pullSharedState = async () => {
+    if (!isSupabaseEnabled || !supabase) return;
+
+    const { data, error } = await supabase
+      .from('shared_state')
+      .select('payload')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (error || !data?.payload) return;
+    applySharedState(data.payload as Partial<SharedAppState>);
+  };
+
   useEffect(() => {
     localStorage.setItem('users', JSON.stringify(users));
   }, [users]);
@@ -347,6 +408,44 @@ function App() {
   useEffect(() => {
     localStorage.setItem('siteLogoUrl', siteLogoUrl);
   }, [siteLogoUrl]);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !supabase) return;
+
+    pullSharedState();
+    const timer = window.setInterval(() => {
+      pullSharedState();
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !supabase) return;
+    if (remoteHydratingRef.current || remoteSavingRef.current) return;
+    const client = supabase;
+
+    const saveSharedState = async () => {
+      remoteSavingRef.current = true;
+      const payload: SharedAppState = {
+        users,
+        markets,
+        secrets,
+        feedbacks,
+        publicAnnouncement,
+        testInviteCode,
+        siteLogoUrl,
+      };
+
+      await client
+        .from('shared_state')
+        .upsert({ id: 1, payload, updated_at: new Date().toISOString() });
+
+      remoteSavingRef.current = false;
+    };
+
+    saveSharedState();
+  }, [users, markets, secrets, feedbacks, publicAnnouncement, testInviteCode, siteLogoUrl]);
 
   useEffect(() => {
     const syncFromHash = () => {
