@@ -750,7 +750,8 @@ function App() {
       return false;
     }
 
-    await pullSharedState(true);
+    // Do a normal pull so freshness guards can block stale remote snapshots.
+    await pullSharedState(false);
     return true;
   };
 
