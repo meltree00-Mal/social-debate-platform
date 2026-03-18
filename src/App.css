@@ -557,9 +557,18 @@ button:disabled {
   border: 1px solid #dfd2bb;
 }
 
+.option-selected {
+  border-color: #2f9e44;
+  box-shadow: inset 0 0 0 1px rgba(47, 158, 68, 0.2);
+}
+
 .option button {
   width: 100%;
   min-height: 42px;
+}
+
+.option button.selected {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
 
 .option-no {
@@ -582,8 +591,26 @@ button:disabled {
   transform: none;
 }
 
+.option button.selected:disabled {
+  background: #2f9e44;
+  color: #f6fff8;
+}
+
+.option-no button.selected:disabled {
+  background: #bf4b43;
+  color: #fff3f2;
+}
+
 .option button:disabled:hover {
   background: #b7aaa2;
+}
+
+.option button.selected:disabled:hover {
+  background: #2f9e44;
+}
+
+.option-no button.selected:disabled:hover {
+  background: #bf4b43;
 }
 
 .market-title-link {
@@ -658,7 +685,7 @@ button:disabled {
 }
 
 .market-revoke-btn {
-  margin-top: 6px;
+  margin-top: 8px;
   background: #8d7f65;
 }
 
