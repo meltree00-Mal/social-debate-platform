@@ -158,6 +158,7 @@ const PREDICTION_PUBLISH_FEE = 10;
 const SECRET_PUBLISH_FEE = 20;
 const VOTE_AMOUNT_OPTIONS = [1, 10, 100] as const;
 const HOME_LOGO_URL = '/social-duixian-logo.png?v=20260317-1';
+const NEW_CONTENT_DURATION_MS = 24 * 60 * 60 * 1000;
 
 const SHARED_TABLES: Record<SharedCollectionKey, string> = {
   users: 'shared_users',
@@ -2002,6 +2003,8 @@ function App() {
   };
 
   const now = Date.now();
+  const isRecentlyPublished = (createdAt: number) => now - createdAt <= NEW_CONTENT_DURATION_MS;
+
   const filteredSecrets = secrets
     .filter(secret => {
       if (secretTimeFilter === 'today') {
@@ -2605,7 +2608,10 @@ function App() {
                   <div className="market-detail-header">
                     <button className="market-back-btn" onClick={closeMarketDetail}>返回预测列表</button>
                   </div>
-                  <h2>{selectedMarket.question}</h2>
+                  <h2 className="title-with-badge">
+                    {isRecentlyPublished(selectedMarket.createdAt) && <span className="new-badge">新</span>}
+                    <span>{selectedMarket.question}</span>
+                  </h2>
                   <p>By: {selectedMarket.creator} | Tag: {selectedMarket.tag} | Deadline: {selectedMarket.deadline}</p>
                   <div className="detail-scoreline">
                     <span>会的：{selectedMarket.yesShares}</span>
@@ -2745,7 +2751,8 @@ function App() {
                   key={market.id}
                   className={`market${new Date(market.deadline).getTime() <= Date.now() ? ' market-expired' : ''}`}
                 >
-                  <h2>
+                  <h2 className="title-with-badge">
+                    {isRecentlyPublished(market.createdAt) && <span className="new-badge">新</span>}
                     <a className="market-title-link" href={`#/prediction/${market.id}`} onClick={() => openMarketDetail(market.id)}>
                       {market.question}
                     </a>
@@ -2870,7 +2877,10 @@ function App() {
                     <div className="secret-detail-header">
                       <button className="market-back-btn" onClick={() => { setSecretDetailId(null); setGossipText(''); setGossipImage(null); setEditingGossipId(null); }}>返回秘密列表</button>
                     </div>
-                    <h2 className="secret-detail-title">{detailSecret.title}</h2>
+                    <h2 className="secret-detail-title title-with-badge">
+                      {isRecentlyPublished(detailSecret.createdAt) && <span className="new-badge">新</span>}
+                      <span>{detailSecret.title}</span>
+                    </h2>
                     <p className="secret-detail-meta">By: {detailSecret.author} | {formatSecretTime(detailSecret.createdAt)}</p>
                     <div className="secret-detail-body">
                       <p>{detailSecret.content}</p>
@@ -3062,7 +3072,10 @@ function App() {
                 return (
                   <div key={secret.id} className="secret">
                     <div className="secret-meta">
-                      <h3>{secret.title}</h3>
+                      <h3 className="title-with-badge">
+                        {isRecentlyPublished(secret.createdAt) && <span className="new-badge">新</span>}
+                        <span>{secret.title}</span>
+                      </h3>
                       <span>{formatSecretTime(secret.createdAt)}</span>
                     </div>
                     <div className="secret-scoreline">

@@ -522,6 +522,29 @@ button:disabled {
   margin: 0;
 }
 
+.title-with-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff6b57 0%, #dc3f2f 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 6px rgba(193, 61, 46, 0.28);
+}
+
 .market.market-expired {
   background: linear-gradient(180deg, #fff1ef 0%, #ffdeda 100%);
   border-color: #df9f98;
@@ -623,6 +646,10 @@ button:disabled {
   text-decoration: underline;
   font-size: inherit;
   font-weight: 800;
+}
+
+.market h2.title-with-badge .market-title-link {
+  display: inline;
 }
 
 .market-title-link:hover {
