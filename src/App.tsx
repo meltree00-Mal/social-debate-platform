@@ -45,6 +45,7 @@ interface SecretGossip {
   text: string;
   imageUrl?: string;
   createdAt: number;
+  likes: string[];
 }
 
 interface Secret {
@@ -262,9 +263,20 @@ function App() {
     );
 
     const normalizedGossips: SecretGossip[] = Array.isArray(secret.gossips)
-      ? secret.gossips.filter((g): g is SecretGossip =>
-          Boolean(g && typeof g.id === 'number' && typeof g.user === 'string' && typeof g.text === 'string')
-        )
+      ? secret.gossips
+        .filter(g => Boolean(g && typeof g.id === 'number' && typeof g.user === 'string'))
+        .map(g => {
+          const rawLikes = Array.isArray(g.likes) ? g.likes : [];
+          const normalizedLikes = Array.from(new Set(rawLikes.filter((name): name is string => typeof name === 'string')));
+          return {
+            id: g.id,
+            user: g.user,
+            text: typeof g.text === 'string' ? g.text : '',
+            imageUrl: typeof g.imageUrl === 'string' ? g.imageUrl : undefined,
+            createdAt: typeof g.createdAt === 'number' ? g.createdAt : g.id,
+            likes: normalizedLikes,
+          };
+        })
       : [];
 
     return {
@@ -376,6 +388,8 @@ function App() {
   const [secretDetailId, setSecretDetailId] = useState<number | null>(null);
   const [gossipText, setGossipText] = useState('');
   const [gossipImage, setGossipImage] = useState<string | null>(null);
+  const [gossipSort, setGossipSort] = useState<'latest' | 'hottest'>('latest');
+  const [editingGossipId, setEditingGossipId] = useState<number | null>(null);
   const [creditHistoryFilter, setCreditHistoryFilter] = useState<'all' | 'recharge' | 'publish' | 'vote' | 'secret-income' | 'other'>('all');
   const [pendingAction, setPendingAction] = useState<ConfirmAction | null>(null);
   const [pendingVoteChoice, setPendingVoteChoice] = useState<PendingVoteChoice | null>(null);
@@ -1517,18 +1531,75 @@ function App() {
     if (!currentUser) return;
     const trimmed = gossipText.trim();
     if (!trimmed && !gossipImage) return;
-    const newGossip: SecretGossip = {
-      id: Date.now(),
-      user: currentUser.name,
-      text: trimmed,
-      imageUrl: gossipImage ?? undefined,
-      createdAt: Date.now(),
-    };
-    setSecrets(prev => prev.map(s =>
-      s.id === secretId ? { ...s, gossips: [...s.gossips, newGossip] } : s
-    ));
+
+    setSecrets(prev => prev.map(s => {
+      if (s.id !== secretId) return s;
+      if (editingGossipId) {
+        return {
+          ...s,
+          gossips: s.gossips.map(g => g.id === editingGossipId
+            ? { ...g, text: trimmed, imageUrl: gossipImage ?? undefined }
+            : g),
+        };
+      }
+
+      const newGossip: SecretGossip = {
+        id: Date.now(),
+        user: currentUser.name,
+        text: trimmed,
+        imageUrl: gossipImage ?? undefined,
+        createdAt: Date.now(),
+        likes: [],
+      };
+
+      return { ...s, gossips: [...s.gossips, newGossip] };
+    }));
+
+    setEditingGossipId(null);
     setGossipText('');
     setGossipImage(null);
+  };
+
+  const startEditGossip = (gossip: SecretGossip) => {
+    setEditingGossipId(gossip.id);
+    setGossipText(gossip.text);
+    setGossipImage(gossip.imageUrl ?? null);
+  };
+
+  const cancelEditGossip = () => {
+    setEditingGossipId(null);
+    setGossipText('');
+    setGossipImage(null);
+  };
+
+  const deleteGossip = (secretId: number, gossipId: number) => {
+    if (!confirm('确定删除这条瓜料吗？')) return;
+    setSecrets(prev => prev.map(s =>
+      s.id === secretId ? { ...s, gossips: s.gossips.filter(g => g.id !== gossipId) } : s
+    ));
+    if (editingGossipId === gossipId) {
+      cancelEditGossip();
+    }
+  };
+
+  const toggleGossipLike = (secretId: number, gossipId: number) => {
+    if (!currentUser) return;
+    setSecrets(prev => prev.map(s => {
+      if (s.id !== secretId) return s;
+      return {
+        ...s,
+        gossips: s.gossips.map(g => {
+          if (g.id !== gossipId) return g;
+          const liked = g.likes.includes(currentUser.name);
+          return {
+            ...g,
+            likes: liked
+              ? g.likes.filter(name => name !== currentUser.name)
+              : [...g.likes, currentUser.name],
+          };
+        }),
+      };
+    }));
   };
 
   const buyShare = async (marketId: number, outcome: 'yes' | 'no', voteAmount: number) => {
@@ -2744,10 +2815,20 @@ function App() {
                 const detailSecret = secrets.find(s => s.id === secretDetailId);
                 if (!detailSecret) return null;
                 const myRatingD = detailSecret.ratings.find(r => r.user === currentUser?.name);
+                const canAccessGossip = Boolean(
+                  currentUser
+                  && (currentUser.isAdmin || currentUser.name === detailSecret.author || viewedSecrets.has(detailSecret.id))
+                );
+                const sortedGossips = [...detailSecret.gossips].sort((a, b) => {
+                  if (gossipSort === 'hottest') {
+                    if (b.likes.length !== a.likes.length) return b.likes.length - a.likes.length;
+                  }
+                  return b.createdAt - a.createdAt;
+                });
                 return (
                   <div className="secret-detail-panel">
                     <div className="secret-detail-header">
-                      <button className="market-back-btn" onClick={() => { setSecretDetailId(null); setGossipText(''); setGossipImage(null); }}>返回秘密列表</button>
+                      <button className="market-back-btn" onClick={() => { setSecretDetailId(null); setGossipText(''); setGossipImage(null); setEditingGossipId(null); }}>返回秘密列表</button>
                     </div>
                     <h2 className="secret-detail-title">{detailSecret.title}</h2>
                     <p className="secret-detail-meta">By: {detailSecret.author} | {formatSecretTime(detailSecret.createdAt)}</p>
@@ -2782,46 +2863,94 @@ function App() {
                     </div>
                     <div className="gossip-section">
                       <h3 className="gossip-section-title">我也有些瓜</h3>
-                      {detailSecret.gossips.length === 0 ? (
-                        <p className="gossip-empty">还没有人上瓜，来分享你知道的吧！</p>
-                      ) : (
-                        <div className="gossip-list">
-                          {detailSecret.gossips.map(g => (
-                            <div key={g.id} className="gossip-item">
-                              <div className="gossip-item-header">
-                                <strong className="gossip-user">{g.user}</strong>
-                                <span className="gossip-time">{formatSecretTime(g.createdAt)}</span>
-                              </div>
-                              {g.text && <p className="gossip-text">{g.text}</p>}
-                              {g.imageUrl && <img className="gossip-image" src={g.imageUrl} alt="gossip" />}
-                            </div>
-                          ))}
+                      {!canAccessGossip ? (
+                        <div className="gossip-paywall">
+                          <p className="gossip-empty">需要先解锁这条秘密，才能查看和发布瓜料。</p>
+                          {currentUser && currentUser.name !== detailSecret.author && !currentUser.isAdmin && !viewedSecrets.has(detailSecret.id) && (
+                            <button className="gossip-unlock-btn" onClick={() => requestViewSecret(detailSecret)}>
+                              支付 {detailSecret.price} Crypo points 解锁
+                            </button>
+                          )}
                         </div>
-                      )}
-                      <div className="gossip-composer">
-                        <textarea
-                          className="gossip-textarea"
-                          placeholder="分享你知道的内幕小道消息…"
-                          value={gossipText}
-                          onChange={(e) => setGossipText(e.target.value)}
-                          rows={3}
-                        />
-                        <label className="gossip-image-upload">
-                          {gossipImage ? '替换图片' : '添加图片'}
-                          <input type="file" accept="image/*" onChange={handleGossipImageChange} />
-                        </label>
-                        {gossipImage && (
-                          <div className="gossip-preview-wrap">
-                            <img className="gossip-preview" src={gossipImage} alt="preview" />
-                            <button className="gossip-remove-img" onClick={() => setGossipImage(null)}>×</button>
+                      ) : (
+                        <>
+                          <div className="gossip-toolbar">
+                            <label>
+                              排序
+                              <select value={gossipSort} onChange={(e) => setGossipSort(e.target.value as 'latest' | 'hottest')}>
+                                <option value="latest">最新</option>
+                                <option value="hottest">最热（点赞）</option>
+                              </select>
+                            </label>
                           </div>
-                        )}
-                        <button
-                          className="gossip-submit-btn"
-                          disabled={!gossipText.trim() && !gossipImage}
-                          onClick={() => submitGossip(detailSecret.id)}
-                        >发布瓜料</button>
-                      </div>
+                          {sortedGossips.length === 0 ? (
+                            <p className="gossip-empty">还没有人上瓜，来分享你知道的吧！</p>
+                          ) : (
+                            <div className="gossip-list">
+                              {sortedGossips.map(g => {
+                                const likedByMe = Boolean(currentUser && g.likes.includes(currentUser.name));
+                                const canEdit = Boolean(currentUser && g.user === currentUser.name);
+                                return (
+                                  <div key={g.id} className="gossip-item">
+                                    <div className="gossip-item-header">
+                                      <strong className="gossip-user">{g.user}</strong>
+                                      <span className="gossip-time">{formatSecretTime(g.createdAt)}</span>
+                                    </div>
+                                    {g.text && <p className="gossip-text">{g.text}</p>}
+                                    {g.imageUrl && <img className="gossip-image" src={g.imageUrl} alt="gossip" />}
+                                    <div className="gossip-item-actions">
+                                      <button
+                                        className={`gossip-like-btn${likedByMe ? ' liked' : ''}`}
+                                        onClick={() => toggleGossipLike(detailSecret.id, g.id)}
+                                      >
+                                        {likedByMe ? '已赞' : '点赞'} {g.likes.length}
+                                      </button>
+                                      {canEdit && (
+                                        <>
+                                          <button className="gossip-edit-btn" onClick={() => startEditGossip(g)}>编辑</button>
+                                          <button className="gossip-delete-btn" onClick={() => deleteGossip(detailSecret.id, g.id)}>删除</button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="gossip-composer">
+                            {editingGossipId && (
+                              <div className="gossip-editing-tip">正在编辑我的瓜料</div>
+                            )}
+                            <textarea
+                              className="gossip-textarea"
+                              placeholder="分享你知道的内幕小道消息..."
+                              value={gossipText}
+                              onChange={(e) => setGossipText(e.target.value)}
+                              rows={3}
+                            />
+                            <label className="gossip-image-upload">
+                              {gossipImage ? '替换图片' : '添加图片'}
+                              <input type="file" accept="image/*" onChange={handleGossipImageChange} />
+                            </label>
+                            {gossipImage && (
+                              <div className="gossip-preview-wrap">
+                                <img className="gossip-preview" src={gossipImage} alt="preview" />
+                                <button className="gossip-remove-img" onClick={() => setGossipImage(null)}>×</button>
+                              </div>
+                            )}
+                            <div className="gossip-composer-actions">
+                              <button
+                                className="gossip-submit-btn"
+                                disabled={!gossipText.trim() && !gossipImage}
+                                onClick={() => submitGossip(detailSecret.id)}
+                              >{editingGossipId ? '保存修改' : '发布瓜料'}</button>
+                              {editingGossipId && (
+                                <button className="gossip-cancel-btn" onClick={cancelEditGossip}>取消编辑</button>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -2965,7 +3094,12 @@ function App() {
                         </div>
                         <button
                           className="secret-detail-link"
-                          onClick={() => setSecretDetailId(secret.id)}
+                          onClick={() => {
+                            setSecretDetailId(secret.id);
+                            setGossipText('');
+                            setGossipImage(null);
+                            setEditingGossipId(null);
+                          }}
                         >
                           查看详情 &amp; 我也有些瓜
                         </button>

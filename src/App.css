@@ -849,10 +849,45 @@ button:disabled {
   margin: 0 0 10px;
 }
 
+.gossip-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.gossip-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: #746757;
+  font-size: 12px;
+}
+
+.gossip-toolbar select {
+  border-radius: 10px;
+  border: 1px solid #d8cab1;
+  background: #fffdf7;
+  padding: 6px 10px;
+}
+
 .gossip-empty {
   margin: 0 0 10px;
   color: #8f7f6a;
   font-size: 13px;
+}
+
+.gossip-paywall {
+  border: 1px dashed #d9c8ad;
+  border-radius: 12px;
+  background: #fffcf4;
+  padding: 12px;
+}
+
+.gossip-unlock-btn {
+  background: #7b6440;
+}
+
+.gossip-unlock-btn:hover {
+  background: #655132;
 }
 
 .gossip-list {
@@ -891,6 +926,41 @@ button:disabled {
   color: #5f5547;
 }
 
+.gossip-item-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.gossip-like-btn {
+  background: #5f8a5b;
+}
+
+.gossip-like-btn:hover {
+  background: #4d7449;
+}
+
+.gossip-like-btn.liked {
+  background: #2f9e44;
+}
+
+.gossip-edit-btn {
+  background: #8a7448;
+}
+
+.gossip-edit-btn:hover {
+  background: #6f5c39;
+}
+
+.gossip-delete-btn {
+  background: #a64f43;
+}
+
+.gossip-delete-btn:hover {
+  background: #8b4137;
+}
+
 .gossip-image {
   width: 100%;
   max-height: 260px;
@@ -902,6 +972,16 @@ button:disabled {
 .gossip-composer {
   display: grid;
   gap: 8px;
+}
+
+.gossip-editing-tip {
+  width: fit-content;
+  font-size: 12px;
+  color: #5b4d3e;
+  background: #f3e7d1;
+  border: 1px solid #dcc9aa;
+  border-radius: 999px;
+  padding: 4px 10px;
 }
 
 .gossip-textarea {
@@ -957,6 +1037,20 @@ button:disabled {
 
 .gossip-submit-btn {
   width: fit-content;
+}
+
+.gossip-composer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gossip-cancel-btn {
+  background: #8e8474;
+}
+
+.gossip-cancel-btn:hover {
+  background: #726b5f;
 }
 
 .market-toolbar {
@@ -2017,5 +2111,37 @@ button:disabled {
   .secret-count {
     white-space: normal;
     text-align: center;
+  }
+
+  .secret-detail-panel {
+    padding: 12px;
+  }
+
+  .gossip-item-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .gossip-toolbar {
+    justify-content: stretch;
+  }
+
+  .gossip-toolbar label,
+  .gossip-toolbar select,
+  .gossip-submit-btn,
+  .gossip-cancel-btn,
+  .gossip-unlock-btn {
+    width: 100%;
+  }
+
+  .gossip-composer-actions,
+  .gossip-item-actions {
+    flex-direction: column;
+  }
+
+  .gossip-preview {
+    width: min(240px, 80vw);
+    height: auto;
+    aspect-ratio: 14 / 9;
   }
 }
