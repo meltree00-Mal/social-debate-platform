@@ -31,6 +31,8 @@ interface ConfirmAction {
 interface PendingVoteChoice {
   marketId: number;
   outcome: 'yes' | 'no';
+  mode: 'new' | 'edit';
+  previousAmount?: number;
 }
 
 interface LoadingState {
@@ -1576,24 +1578,140 @@ function App() {
 
     const hasActiveVote = market.voteRecords.some(record => record.user === currentUser.name && record.status === 'active');
     if (hasActiveVote) {
-      alert('你在该预测已投过，不能重复投票。');
+      const activeVote = market.voteRecords
+        .filter(record => record.user === currentUser.name && record.status === 'active')
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+      setPendingVoteChoice({
+        marketId: market.id,
+        outcome,
+        mode: 'edit',
+        previousAmount: activeVote?.amount ?? 0,
+      });
       return;
     }
 
-    setPendingVoteChoice({ marketId: market.id, outcome });
+    setPendingVoteChoice({ marketId: market.id, outcome, mode: 'new' });
   };
 
   const submitVoteWithAmount = (amount: number) => {
     if (!pendingVoteChoice || !currentUser) return;
+
+    const { marketId, outcome, mode } = pendingVoteChoice;
+    setPendingVoteChoice(null);
+
+    if (mode === 'edit') {
+      void modifyVoteChoice(marketId, outcome, amount);
+      return;
+    }
 
     if (currentUser.credit < amount) {
       alert('Insufficient Crypo points');
       return;
     }
 
-    const { marketId, outcome } = pendingVoteChoice;
-    setPendingVoteChoice(null);
     void buyShare(marketId, outcome, amount);
+  };
+
+  const modifyVoteChoice = async (marketId: number, outcome: 'yes' | 'no', nextAmount: number) => {
+    if (!currentUser) return;
+
+    const market = markets.find(item => item.id === marketId);
+    if (!market) return;
+
+    if (market.resolvedOutcome || new Date(market.deadline).getTime() <= Date.now()) {
+      alert('该预测当前不可修改投票。');
+      return;
+    }
+
+    const currentVote = market.voteRecords
+      .filter(record => record.user === currentUser.name && record.status === 'active')
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+    if (!currentVote) {
+      void buyShare(marketId, outcome, nextAmount);
+      return;
+    }
+
+    const creditAfterRefund = currentUser.credit + currentVote.amount;
+    if (creditAfterRefund < nextAmount) {
+      alert('Insufficient Crypo points');
+      return;
+    }
+
+    const changeTimestamp = Date.now();
+    const nextMarkets = markets.map(item => {
+      if (item.id !== marketId) return item;
+
+      const targetIndex = item.voteRecords.findIndex(record => record.id === currentVote.id);
+      if (targetIndex < 0) return item;
+
+      const revokedRecords = item.voteRecords.map((record, index) => {
+        if (index !== targetIndex) return record;
+        return { ...record, status: 'revoked' as const, revokedAt: changeTimestamp };
+      });
+
+      const newRecord: Market['voteRecords'][number] = {
+        id: changeTimestamp + Math.floor(Math.random() * 1000),
+        user: currentUser.name,
+        outcome,
+        amount: nextAmount,
+        createdAt: changeTimestamp,
+        status: 'active',
+      };
+
+      const nextMarket = {
+        ...item,
+        voteRecords: [...revokedRecords, newRecord],
+        yesShares: item.yesShares,
+        noShares: item.noShares,
+      };
+
+      if (currentVote.outcome === 'yes') {
+        nextMarket.yesShares = Math.max(0, nextMarket.yesShares - currentVote.amount);
+      } else {
+        nextMarket.noShares = Math.max(0, nextMarket.noShares - currentVote.amount);
+      }
+
+      if (outcome === 'yes') {
+        nextMarket.yesShares += nextAmount;
+      } else {
+        nextMarket.noShares += nextAmount;
+      }
+
+      return nextMarket;
+    });
+
+    const { nextUsers, nextCurrentUser } = applyCreditChanges(
+      users,
+      [{
+        userName: currentUser.name,
+        delta: currentVote.amount - nextAmount,
+        reason: `Modify vote on prediction (${currentVote.amount} -> ${nextAmount} Crypo points)`
+      }],
+      currentUser.name,
+    );
+
+    setLoadingState({
+      type: 'vote',
+      title: '正在修改投票',
+      message: '正在退回原投入并提交新选择，预测主页更新后会自动关闭。',
+    });
+
+    setUsers(nextUsers);
+    if (nextCurrentUser) {
+      setCurrentUser(nextCurrentUser);
+    }
+    setMarkets(nextMarkets);
+
+    try {
+      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      if (!didPersist) {
+        alert(getSyncFailureMessage('投票修改已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
+      }
+    } finally {
+      setLoadingState(null);
+    }
   };
 
   const calculateSettlementRewards = (market: Market, outcome: 'yes' | 'no') => {
@@ -1712,94 +1830,6 @@ function App() {
         resultFeedbacks: nextFeedbacks,
       };
     }));
-  };
-
-  const revokeLatestVote = async (marketId: number) => {
-    if (!currentUser) return;
-
-    let revoked = false;
-
-    const revokeTimestamp = Date.now();
-    let refundAmount = 0;
-    const nextMarkets = markets.map(market => {
-      if (market.id !== marketId) return market;
-
-      const activeIndexes = market.voteRecords
-        .map((record, index) => ({ record, index }))
-        .filter(item => item.record.user === currentUser.name && item.record.status === 'active')
-        .sort((a, b) => b.record.createdAt - a.record.createdAt);
-
-      if (activeIndexes.length === 0) {
-        return market;
-      }
-
-      const target = activeIndexes[0];
-      refundAmount = target.record.amount;
-      const newVoteRecords: Market['voteRecords'] = market.voteRecords.map((record, index) => {
-        if (index !== target.index) return record;
-        return { ...record, status: 'revoked' as const, revokedAt: revokeTimestamp };
-      });
-
-      const nextMarket = { ...market, voteRecords: newVoteRecords };
-      if (target.record.outcome === 'yes') {
-        nextMarket.yesShares = Math.max(0, nextMarket.yesShares - 1);
-      } else {
-        nextMarket.noShares = Math.max(0, nextMarket.noShares - 1);
-      }
-
-      revoked = true;
-      return nextMarket;
-    });
-
-    if (revoked) {
-      const { nextUsers, nextCurrentUser } = applyCreditChanges(
-        users,
-        [{ userName: currentUser.name, delta: refundAmount, reason: `Revoke vote refund (${refundAmount} Crypo points)` }],
-        currentUser.name,
-      );
-
-      setLoadingState({
-        type: 'revoke',
-        title: '正在撤销投票',
-        message: '正在同步撤票记录和积分返还，预测主页更新后会自动关闭。',
-      });
-
-      setUsers(nextUsers);
-      if (nextCurrentUser) {
-        setCurrentUser(nextCurrentUser);
-      }
-      setMarkets(nextMarkets);
-
-      try {
-        const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
-        if (!didPersist) {
-          alert(getSyncFailureMessage('撤销投票已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
-        }
-      } finally {
-        setLoadingState(null);
-      }
-    } else {
-      alert('你还没有可撤销的投票。');
-    }
-  };
-
-  const requestRevokeVote = (market: Market) => {
-    if (!currentUser) return;
-    const latestActiveVote = market.voteRecords
-      .filter(record => record.user === currentUser.name && record.status === 'active')
-      .sort((a, b) => b.createdAt - a.createdAt)[0];
-
-    if (!latestActiveVote) {
-      alert('你还没有可撤销的投票。');
-      return;
-    }
-
-    openConfirm(
-      '确认撤销投票',
-      `将撤销你在该预测最近的一次投票，并返还 ${latestActiveVote.amount} Crypo points。\n撤销行为会记录在投票历史中。`,
-      () => revokeLatestVote(market.id),
-      '确认撤销',
-    );
   };
 
   const toggleFollowMarket = (marketId: number) => {
@@ -2262,8 +2292,11 @@ function App() {
           {pendingVoteChoice && (
             <div className="confirm-overlay" onClick={() => setPendingVoteChoice(null)}>
               <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
-                <h3>选择投票额度</h3>
-                <p>你选择了“{pendingVoteChoice.outcome === 'yes' ? '会的' : '不会的'}”，请选择本次投入。</p>
+                <h3>{pendingVoteChoice.mode === 'edit' ? '修改我的选择' : '选择投票额度'}</h3>
+                <p>
+                  你选择了“{pendingVoteChoice.outcome === 'yes' ? '会的' : '不会的'}”，请选择本次投入。
+                  {pendingVoteChoice.mode === 'edit' && ` 将先退回你当前的 ${pendingVoteChoice.previousAmount ?? 0} Crypo points。`}
+                </p>
                 <div className="confirm-actions">
                   <button className="confirm-cancel" onClick={() => setPendingVoteChoice(null)}>取消</button>
                   <button onClick={() => submitVoteWithAmount(VOTE_AMOUNT_OPTIONS[0])}>小试牛刀 {VOTE_AMOUNT_OPTIONS[0]} Crypo point</button>
@@ -2633,9 +2666,6 @@ function App() {
                   <p className="market-my-votes">
                     已有 {(market.yesShares + market.noShares).toFixed(2)} Crypo points 投入该预测
                   </p>
-                  {new Date(market.deadline).getTime() > Date.now() && (
-                    <button className="market-revoke-btn" onClick={() => requestRevokeVote(market)}>撤销我最近一票</button>
-                  )}
                   {new Date(market.deadline).getTime() <= Date.now() && currentUser && market.participants.includes(currentUser.name) && (
                     <div className="market-feedback-row">
                       <span>对于这个结果，你的感受是</span>
