@@ -1937,22 +1937,6 @@ function App() {
 
   const selectedMarket = marketDetailId ? markets.find(market => market.id === marketDetailId) ?? null : null;
 
-  const detailVoteStats = selectedMarket
-    ? Object.values(selectedMarket.voteRecords.reduce<Record<string, { user: string; yes: number; no: number; total: number; revoked: number; lastVoteAt: number }>>((acc, vote) => {
-      const existing = acc[vote.user] ?? { user: vote.user, yes: 0, no: 0, total: 0, revoked: 0, lastVoteAt: 0 };
-      const next = {
-        ...existing,
-        yes: existing.yes + (vote.status === 'active' && vote.outcome === 'yes' ? 1 : 0),
-        no: existing.no + (vote.status === 'active' && vote.outcome === 'no' ? 1 : 0),
-        total: existing.total + 1,
-        revoked: existing.revoked + (vote.status === 'revoked' ? 1 : 0),
-        lastVoteAt: Math.max(existing.lastVoteAt, vote.createdAt),
-      };
-      acc[vote.user] = next;
-      return acc;
-    }, {})).sort((a, b) => b.total - a.total)
-    : [];
-
   const detailProfitLeaderboard = selectedMarket && selectedMarket.resolvedOutcome
     ? (() => {
       const activeVotes = selectedMarket.voteRecords.filter(record => record.status === 'active');
@@ -2511,23 +2495,43 @@ function App() {
                       )}
                     </>
                   )}
-                  <h3>用户投票统计</h3>
-                  {detailVoteStats.length === 0 ? (
-                    <div className="secret-empty">暂无投票记录。</div>
-                  ) : (
-                    <div className="vote-user-table">
-                      {detailVoteStats.map(stat => (
-                        <div key={stat.user} className="vote-user-row">
-                          <strong>{stat.user}</strong>
-                          <span>总计：{stat.total}</span>
-                          <span>会的：{stat.yes}</span>
-                          <span>不会的：{stat.no}</span>
-                          <span>撤销：{stat.revoked}</span>
-                          <span>最近投票：{formatVoteTime(stat.lastVoteAt)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <h3>投票结果分布</h3>
+                  {(() => {
+                    const activeVotes = selectedMarket.voteRecords.filter(r => r.status === 'active');
+                    const yesTotal = activeVotes.filter(r => r.outcome === 'yes').reduce((s, r) => s + r.amount, 0);
+                    const noTotal = activeVotes.filter(r => r.outcome === 'no').reduce((s, r) => s + r.amount, 0);
+                    const grandTotal = yesTotal + noTotal;
+                    const yesPct = grandTotal > 0 ? (yesTotal / grandTotal * 100) : 0;
+                    const noPct = grandTotal > 0 ? (noTotal / grandTotal * 100) : 0;
+                    const yesCount = activeVotes.filter(r => r.outcome === 'yes').length;
+                    const noCount = activeVotes.filter(r => r.outcome === 'no').length;
+                    return (
+                      <div className="vote-result-chart">
+                        {grandTotal === 0 ? (
+                          <p className="vote-chart-empty">暂无投票记录。</p>
+                        ) : (
+                          <>
+                            <div className="vote-bar-row">
+                              <span className="vote-bar-label yes-label">会的</span>
+                              <div className="vote-bar-track">
+                                <div className="vote-bar-fill yes-fill" style={{ width: `${yesPct}%` }} />
+                              </div>
+                              <span className="vote-bar-pct">{yesPct.toFixed(1)}%</span>
+                              <span className="vote-bar-detail">{yesTotal} pts · {yesCount} 人</span>
+                            </div>
+                            <div className="vote-bar-row">
+                              <span className="vote-bar-label no-label">不会的</span>
+                              <div className="vote-bar-track">
+                                <div className="vote-bar-fill no-fill" style={{ width: `${noPct}%` }} />
+                              </div>
+                              <span className="vote-bar-pct">{noPct.toFixed(1)}%</span>
+                              <span className="vote-bar-detail">{noTotal} pts · {noCount} 人</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <h3>投票时间线</h3>
                   {selectedMarket.voteRecords.length === 0 ? (
                     <div className="secret-empty">暂无投票记录。</div>
@@ -2538,10 +2542,11 @@ function App() {
                         .map((record, index) => (
                           <div key={`${record.user}-${record.createdAt}-${index}`} className="vote-timeline-item">
                             <strong>{record.user}</strong>
-                            <span>{record.outcome === 'yes' ? '会的' : '不会的'}</span>
-                            <span>{record.status === 'revoked' ? '已撤销' : '有效票'}</span>
-                            <span>{formatVoteTime(record.createdAt)}</span>
-                            {record.revokedAt && <span>撤销时间：{formatVoteTime(record.revokedAt)}</span>}
+                            <span className={`timeline-outcome ${record.outcome}`}>{record.outcome === 'yes' ? '会的' : '不会的'}</span>
+                            <span className="timeline-amount">{record.amount} pts</span>
+                            <span className={`timeline-status ${record.status}`}>{record.status === 'revoked' ? '已撤销' : '有效票'}</span>
+                            <span className="timeline-time">{formatVoteTime(record.createdAt)}</span>
+                            {record.revokedAt && <span className="timeline-revoked-time">撤销：{formatVoteTime(record.revokedAt)}</span>}
                           </div>
                         ))}
                     </div>
