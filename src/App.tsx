@@ -1393,6 +1393,35 @@ function App() {
     );
   };
 
+  const commitSecretMutation = async (
+    nextSecrets: Secret[],
+    options?: {
+      nextUsers?: User[];
+      nextCurrentUser?: User | null;
+      failureMessage?: string;
+    },
+  ) => {
+    lastLocalMutationAtRef.current = Date.now();
+    setSecrets(nextSecrets);
+
+    if (options?.nextUsers) {
+      setUsers(options.nextUsers);
+    }
+
+    if (typeof options?.nextCurrentUser !== 'undefined' && options.nextCurrentUser) {
+      setCurrentUser(options.nextCurrentUser);
+    }
+
+    const didPersist = await persistSharedState({
+      secrets: nextSecrets,
+      ...(options?.nextUsers ? { users: options.nextUsers } : {}),
+    });
+
+    if (!didPersist) {
+      alert(getSyncFailureMessage(options?.failureMessage ?? '秘密互动已在当前页面生效，但同步失败，请稍后刷新确认。'));
+    }
+  };
+
   const startEditSecret = (secret: Secret) => {
     setEditingSecret(secret);
     setEditSecretTitle(secret.title);
@@ -1401,14 +1430,15 @@ function App() {
     setEditSecretPrice(secret.price);
   };
 
-  const saveSecretEdit = () => {
+  const saveSecretEdit = async () => {
     if (editingSecret) {
-      setSecrets(prev => prev.map(s => s.id === editingSecret.id ? { ...s, title: editSecretTitle, content: editSecretContent, imageUrl: editSecretImage ?? undefined, price: editSecretPrice } : s));
+      const nextSecrets = secrets.map(s => s.id === editingSecret.id ? { ...s, title: editSecretTitle, content: editSecretContent, imageUrl: editSecretImage ?? undefined, price: editSecretPrice } : s);
       setEditingSecret(null);
       setEditSecretTitle('');
       setEditSecretContent('');
       setEditSecretImage(null);
       setEditSecretPrice(1);
+      await commitSecretMutation(nextSecrets, { failureMessage: '秘密编辑已在当前页面生效，但同步失败，请稍后刷新确认。' });
     }
   };
 
@@ -1420,14 +1450,15 @@ function App() {
     setEditSecretPrice(1);
   };
 
-  const deleteSecret = (secretId: number) => {
+  const deleteSecret = async (secretId: number) => {
     if (confirm('Delete this secret?')) {
-      setSecrets(prev => prev.filter(s => s.id !== secretId));
+      const nextSecrets = secrets.filter(s => s.id !== secretId);
       setViewedSecrets(prev => {
         const next = new Set(prev);
         next.delete(secretId);
         return next;
       });
+      await commitSecretMutation(nextSecrets, { failureMessage: '秘密删除已在当前页面生效，但同步失败，请稍后刷新确认。' });
     }
   };
 
@@ -1493,29 +1524,34 @@ function App() {
     );
   };
 
-  const rateSecret = (secretId: number, authenticity: '真实' | '不真实', value: '值得' | '不值得') => {
+  const rateSecret = async (secretId: number, authenticity: '真实' | '不真实', value: '值得' | '不值得') => {
     if (!currentUser) return;
 
-    const awardPoints = (author: string, points: number) => {
-      updateUserCredit(author, points, 'Secret rating reward');
-    };
+    const targetSecret = secrets.find(secret => secret.id === secretId);
+    if (!targetSecret) return;
 
-    setSecrets(prev => prev.map(s => {
-      if (s.id === secretId) {
-        const existing = s.ratings.find(r => r.user === currentUser.name);
-        const newRating = { user: currentUser.name, authenticity, value };
-        const newRatings = existing ? s.ratings.map(r => r.user === currentUser.name ? newRating : r) : [...s.ratings, newRating];
-        // Only award point delta to prevent repeated toggling from farming points.
-        const oldScore = scoreFromRating(existing);
-        const newScore = scoreFromRating(newRating);
-        const delta = newScore - oldScore;
-        if (delta !== 0) {
-          awardPoints(s.author, delta);
-        }
-        return { ...s, ratings: newRatings };
-      }
-      return s;
-    }));
+    const existing = targetSecret.ratings.find(r => r.user === currentUser.name);
+    const newRating = { user: currentUser.name, authenticity, value };
+    const newRatings = existing
+      ? targetSecret.ratings.map(r => r.user === currentUser.name ? newRating : r)
+      : [...targetSecret.ratings, newRating];
+    const nextSecrets = secrets.map(secret => secret.id === secretId ? { ...secret, ratings: newRatings } : secret);
+
+    const oldScore = scoreFromRating(existing);
+    const newScore = scoreFromRating(newRating);
+    const delta = newScore - oldScore;
+
+    if (delta !== 0) {
+      const { nextUsers, nextCurrentUser } = applyCreditDelta(users, targetSecret.author, delta, 'Secret rating reward', currentUser?.name);
+      await commitSecretMutation(nextSecrets, {
+        nextUsers,
+        nextCurrentUser,
+        failureMessage: '秘密评价已在当前页面生效，但同步失败，请稍后刷新确认。',
+      });
+      return;
+    }
+
+    await commitSecretMutation(nextSecrets, { failureMessage: '秘密评价已在当前页面生效，但同步失败，请稍后刷新确认。' });
   };
 
   const handleGossipImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1528,12 +1564,12 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const submitGossip = (secretId: number) => {
+  const submitGossip = async (secretId: number) => {
     if (!currentUser) return;
     const trimmed = gossipText.trim();
     if (!trimmed && !gossipImage) return;
 
-    setSecrets(prev => prev.map(s => {
+    const nextSecrets = secrets.map(s => {
       if (s.id !== secretId) return s;
       if (editingGossipId) {
         return {
@@ -1554,11 +1590,12 @@ function App() {
       };
 
       return { ...s, gossips: [...s.gossips, newGossip] };
-    }));
+    });
 
     setEditingGossipId(null);
     setGossipText('');
     setGossipImage(null);
+    await commitSecretMutation(nextSecrets, { failureMessage: '瓜料已在当前页面生效，但同步失败，请稍后刷新确认。' });
   };
 
   const startEditGossip = (gossip: SecretGossip) => {
@@ -1573,19 +1610,20 @@ function App() {
     setGossipImage(null);
   };
 
-  const deleteGossip = (secretId: number, gossipId: number) => {
+  const deleteGossip = async (secretId: number, gossipId: number) => {
     if (!confirm('确定删除这条瓜料吗？')) return;
-    setSecrets(prev => prev.map(s =>
+    const nextSecrets = secrets.map(s =>
       s.id === secretId ? { ...s, gossips: s.gossips.filter(g => g.id !== gossipId) } : s
-    ));
+    );
     if (editingGossipId === gossipId) {
       cancelEditGossip();
     }
+    await commitSecretMutation(nextSecrets, { failureMessage: '瓜料删除已在当前页面生效，但同步失败，请稍后刷新确认。' });
   };
 
-  const toggleGossipLike = (secretId: number, gossipId: number) => {
+  const toggleGossipLike = async (secretId: number, gossipId: number) => {
     if (!currentUser) return;
-    setSecrets(prev => prev.map(s => {
+    const nextSecrets = secrets.map(s => {
       if (s.id !== secretId) return s;
       return {
         ...s,
@@ -1600,7 +1638,8 @@ function App() {
           };
         }),
       };
-    }));
+    });
+    await commitSecretMutation(nextSecrets, { failureMessage: '瓜料点赞已在当前页面生效，但同步失败，请稍后刷新确认。' });
   };
 
   const buyShare = async (marketId: number, outcome: 'yes' | 'no', voteAmount: number) => {
