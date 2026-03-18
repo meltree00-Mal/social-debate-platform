@@ -766,12 +766,25 @@ button:disabled {
   margin-bottom: 8px;
 }
 
-.secret-meta span {
+.secret-meta > span {
   font-size: 12px;
   color: #6b6559;
   background: var(--club-chip);
   border-radius: 999px;
   padding: 4px 10px;
+}
+
+.secret-meta h3.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.secret-meta h3.title-with-badge > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .secret-scoreline {
@@ -1182,7 +1195,7 @@ button:disabled {
 .app.secret-mode .hint,
 .app.secret-mode .secret p,
 .app.secret-mode .secret-toolbar label,
-.app.secret-mode .secret-meta span,
+.app.secret-mode .secret-meta > span,
 .app.secret-mode .secret-count,
 .app.secret-mode .secret-scoreline span,
 .app.secret-mode .ratings-caption,
@@ -1192,7 +1205,7 @@ button:disabled {
   color: #6f675a;
 }
 
-.app.secret-mode .secret-meta span,
+.app.secret-mode .secret-meta > span,
 .app.secret-mode .secret-count,
 .app.secret-mode .secret-scoreline span {
   background: var(--club-chip);
