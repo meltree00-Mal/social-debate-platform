@@ -1128,30 +1128,28 @@ button:disabled {
 }
 
 .app.secret-mode {
-  background: radial-gradient(circle at 15% 10%, #2f2a46 0%, #181626 44%, #10111b 100%);
-  border-color: #35344a;
-  box-shadow: 0 14px 38px rgba(8, 9, 17, 0.55);
+  background: radial-gradient(circle at 0% 0%, #fffaf0 0%, var(--club-paper) 58%, var(--club-paper-2) 100%);
+  border-color: var(--club-border);
+  box-shadow: var(--club-shadow);
 }
 
-.app.secret-mode h1 {
-  color: #f3efff;
-  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+.app.secret-mode h1,
+.app.secret-mode .welcome,
+.app.secret-mode .secret-meta h3,
+.app.secret-mode .publish h2 {
+  color: var(--club-ink);
+  text-shadow: none;
 }
 
 .app.secret-mode .header,
 .app.secret-mode .secret-toolbar,
 .app.secret-mode .publish.secret-publish,
 .app.secret-mode .secret,
-.app.secret-mode .secret-empty {
-  background: linear-gradient(160deg, rgba(42, 37, 66, 0.94) 0%, rgba(22, 19, 37, 0.94) 100%);
-  border-color: #474264;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
-}
-
-.app.secret-mode .welcome,
-.app.secret-mode .secret-meta h3,
-.app.secret-mode .publish h2 {
-  color: #f3efff;
+.app.secret-mode .secret-empty,
+.app.secret-mode .secret-detail-panel {
+  background: rgba(255, 252, 244, 0.94);
+  border-color: var(--club-border);
+  box-shadow: 0 2px 0 rgba(31, 28, 22, 0.05);
 }
 
 .app.secret-mode .hint,
@@ -1160,40 +1158,41 @@ button:disabled {
 .app.secret-mode .secret-meta span,
 .app.secret-mode .secret-count,
 .app.secret-mode .secret-scoreline span,
-.app.secret-mode .ratings-group span,
-.app.secret-mode .ratings-caption {
-  color: #d0cbe8;
+.app.secret-mode .ratings-caption,
+.app.secret-mode .secret-detail-meta,
+.app.secret-mode .gossip-empty,
+.app.secret-mode .gossip-time {
+  color: #6f675a;
 }
 
 .app.secret-mode .secret-meta span,
 .app.secret-mode .secret-count,
-.app.secret-mode .secret-scoreline span,
-.app.secret-mode .ratings-group {
-  background: rgba(119, 106, 171, 0.22);
-  border-color: #5f5587;
+.app.secret-mode .secret-scoreline span {
+  background: var(--club-chip);
+  border-color: #dacdb8;
 }
 
 .app.secret-mode .ratings-facebook {
-  background: rgba(27, 23, 44, 0.88);
-  border-color: #59517e;
+  background: linear-gradient(180deg, #fffdf8 0%, #f9f4e6 100%);
+  border-color: #e1d4ba;
 }
 
 .app.secret-mode .ratings button {
-  background: rgba(24, 21, 39, 0.9);
-  color: #d8d2ee;
-  border-color: #615889;
+  background: #fffdf7;
+  color: #5f5547;
+  border-color: #d8ccb8;
 }
 
 .app.secret-mode .ratings button.positive {
-  background: rgba(40, 120, 84, 0.24);
-  color: #9ce3be;
-  border-color: #3a916a;
+  background: #edf9f0;
+  color: #2c7d3a;
+  border-color: #b7dfbf;
 }
 
 .app.secret-mode .ratings button.negative {
-  background: rgba(163, 62, 62, 0.22);
-  color: #f1b0b0;
-  border-color: #b86d6d;
+  background: #fff0ef;
+  color: #a9443d;
+  border-color: #e3b8b3;
 }
 
 .app.secret-mode .ratings button.positive.selected {
@@ -1214,10 +1213,11 @@ button:disabled {
 .app.secret-mode .secret-toolbar select,
 .app.secret-mode .secret-edit input,
 .app.secret-mode .secret-edit textarea,
-.app.secret-mode .secret-edit select {
-  background: rgba(15, 14, 28, 0.85);
-  border-color: #544d78;
-  color: #f3efff;
+.app.secret-mode .secret-edit select,
+.app.secret-mode .gossip-textarea {
+  background: #fffdf7;
+  border-color: #d9ceb8;
+  color: var(--club-ink);
 }
 
 .app.secret-mode .publish.secret-publish input:focus,
@@ -1226,17 +1226,24 @@ button:disabled {
 .app.secret-mode .secret-toolbar select:focus,
 .app.secret-mode .secret-edit input:focus,
 .app.secret-mode .secret-edit textarea:focus,
-.app.secret-mode .secret-edit select:focus {
-  border-color: #8578c2;
-  box-shadow: 0 0 0 3px rgba(133, 120, 194, 0.25);
+.app.secret-mode .secret-edit select:focus,
+.app.secret-mode .gossip-textarea:focus {
+  border-color: #b89c6f;
+  box-shadow: 0 0 0 3px rgba(184, 156, 111, 0.18);
 }
 
 .app.secret-mode .share-btn {
-  background: #1d7e66;
+  background: #7b6440;
 }
 
 .app.secret-mode .share-btn:hover {
-  background: #186b57;
+  background: #655132;
+}
+
+.secret-rating-summary {
+  margin: 0 0 10px;
+  color: #6f6659;
+  font-size: 13px;
 }
 
 .market-detail {

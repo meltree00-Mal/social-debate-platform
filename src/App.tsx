@@ -3057,6 +3057,7 @@ function App() {
                 const fakeCount = secret.ratings.filter(r => r.authenticity === '不真实').length;
                 const worthCount = secret.ratings.filter(r => r.value === '值得').length;
                 const unworthCount = secret.ratings.filter(r => r.value === '不值得').length;
+                const totalRatings = secret.ratings.length;
 
                 return (
                   <div key={secret.id} className="secret">
@@ -3070,6 +3071,7 @@ function App() {
                       <span>值得 {worthCount}</span>
                       <span>不值得 {unworthCount}</span>
                     </div>
+                    <p className="secret-rating-summary">已有 {totalRatings} 条评价</p>
                     <p>By: {secret.author} | Price: {secret.price} Crypo points</p>
                     {currentUser?.isAdmin && (
                       <div className="secret-admin">
