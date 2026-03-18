@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import { supabase, isSupabaseEnabled } from './lib/supabase'
+import { Analytics } from '@vercel/analytics/react'
 
 interface User {
   id: number;
@@ -2027,7 +2028,7 @@ function App() {
                     <p className="market-status-expired">{market.resolvedOutcome ? '已截止（已结算）' : '已截止，禁止继续投票'}</p>
                   )}
                   {!market.resolvedOutcome && new Date(market.deadline).getTime() <= Date.now() && (
-                    <p className="market-system-tip">系统提示：结果需由发布者或管理员发布。</p>
+                    <p className="market-system-tip">系统提示：结��需由发布者或管理员发布。</p>
                   )}
                   <p className="market-vote-rule">投票说明：每次投票消耗 1 Crypo point，每位用户最多投 5 次。</p>
                   {market.resolvedOutcome ? (
@@ -2264,6 +2265,7 @@ function App() {
           )}
         </>
       )}
+      <Analytics />
     </div>
   );
 }
