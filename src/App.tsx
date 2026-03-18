@@ -174,20 +174,8 @@ function App() {
   const currentUserRef = useRef<User | null>(null);
   const [hasCompletedInitialRemoteSync, setHasCompletedInitialRemoteSync] = useState(!isSupabaseEnabled);
 
-  const normalizeMarket = (market: Partial<Market>): Market => ({
-    id: typeof market.id === 'number' ? market.id : Date.now(),
-    question: typeof market.question === 'string' ? market.question : 'Untitled prediction',
-    tag: market.tag === '政治' || market.tag === '经济' || market.tag === '生活' ? market.tag : '生活',
-    createdAt: typeof market.createdAt === 'number'
-      ? market.createdAt
-      : (typeof market.id === 'number' ? market.id : Date.now()),
-    participants: Array.isArray(market.participants)
-      ? market.participants.filter((name): name is string => typeof name === 'string')
-      : [],
-    followers: Array.isArray(market.followers)
-      ? market.followers.filter((name): name is string => typeof name === 'string')
-      : [],
-    voteRecords: Array.isArray(market.voteRecords)
+  const normalizeMarket = (market: Partial<Market>): Market => {
+    const normalizedVoteRecords: Market['voteRecords'] = Array.isArray(market.voteRecords)
       ? market.voteRecords
         .filter(record => (
           Boolean(record)
@@ -204,32 +192,56 @@ function App() {
           status: record.status === 'revoked' ? 'revoked' : 'active',
           revokedAt: typeof record.revokedAt === 'number' ? record.revokedAt : undefined,
         }))
-      : [],
-    resultFeedbacks: Array.isArray(market.resultFeedbacks)
-      ? market.resultFeedbacks
-        .filter(item => (
-          Boolean(item)
-          && typeof item.user === 'string'
-          && (item.stance === 'accept' || item.stance === 'verify')
-          && typeof item.createdAt === 'number'
-        ))
-        .map(item => ({
-          user: item.user,
-          stance: item.stance,
-          createdAt: item.createdAt,
-        }))
-      : [],
-    b: typeof market.b === 'number' ? market.b : 100,
-    yesShares: typeof market.yesShares === 'number' ? market.yesShares : 100,
-    noShares: typeof market.noShares === 'number' ? market.noShares : 100,
-    yesPrice: typeof market.yesPrice === 'number' ? market.yesPrice : 0,
-    noPrice: typeof market.noPrice === 'number' ? market.noPrice : 0,
-    creator: typeof market.creator === 'string' ? market.creator : 'Unknown',
-    deadline: typeof market.deadline === 'string' ? market.deadline : '',
-    pinnedAt: typeof market.pinnedAt === 'number' ? market.pinnedAt : undefined,
-    resolvedOutcome: market.resolvedOutcome === 'yes' || market.resolvedOutcome === 'no' ? market.resolvedOutcome : undefined,
-    resolvedAt: typeof market.resolvedAt === 'number' ? market.resolvedAt : undefined,
-  });
+      : [];
+
+    const activeVoteRecords = normalizedVoteRecords.filter(record => record.status === 'active');
+    const yesStake = activeVoteRecords
+      .filter(record => record.outcome === 'yes')
+      .reduce((sum, record) => sum + record.amount, 0);
+    const noStake = activeVoteRecords
+      .filter(record => record.outcome === 'no')
+      .reduce((sum, record) => sum + record.amount, 0);
+
+    return {
+      id: typeof market.id === 'number' ? market.id : Date.now(),
+      question: typeof market.question === 'string' ? market.question : 'Untitled prediction',
+      tag: market.tag === '政治' || market.tag === '经济' || market.tag === '生活' ? market.tag : '生活',
+      createdAt: typeof market.createdAt === 'number'
+        ? market.createdAt
+        : (typeof market.id === 'number' ? market.id : Date.now()),
+      participants: Array.isArray(market.participants)
+        ? market.participants.filter((name): name is string => typeof name === 'string')
+        : [],
+      followers: Array.isArray(market.followers)
+        ? market.followers.filter((name): name is string => typeof name === 'string')
+        : [],
+      voteRecords: normalizedVoteRecords,
+      resultFeedbacks: Array.isArray(market.resultFeedbacks)
+        ? market.resultFeedbacks
+          .filter(item => (
+            Boolean(item)
+            && typeof item.user === 'string'
+            && (item.stance === 'accept' || item.stance === 'verify')
+            && typeof item.createdAt === 'number'
+          ))
+          .map(item => ({
+            user: item.user,
+            stance: item.stance,
+            createdAt: item.createdAt,
+          }))
+        : [],
+      b: typeof market.b === 'number' ? market.b : 100,
+      yesShares: yesStake,
+      noShares: noStake,
+      yesPrice: typeof market.yesPrice === 'number' ? market.yesPrice : 0,
+      noPrice: typeof market.noPrice === 'number' ? market.noPrice : 0,
+      creator: typeof market.creator === 'string' ? market.creator : 'Unknown',
+      deadline: typeof market.deadline === 'string' ? market.deadline : '',
+      pinnedAt: typeof market.pinnedAt === 'number' ? market.pinnedAt : undefined,
+      resolvedOutcome: market.resolvedOutcome === 'yes' || market.resolvedOutcome === 'no' ? market.resolvedOutcome : undefined,
+      resolvedAt: typeof market.resolvedAt === 'number' ? market.resolvedAt : undefined,
+    };
+  };
 
   const normalizeSecret = (secret: Partial<Secret>): Secret => {
     const rawRatings = Array.isArray(secret.ratings) ? secret.ratings : [];
@@ -2619,7 +2631,7 @@ function App() {
                     </div>
                   )}
                   <p className="market-my-votes">
-                    已有 {market.voteRecords.filter(record => record.status === 'active').reduce((sum, record) => sum + record.amount, 0).toFixed(2)} Crypo points 投入该预测
+                    已有 {(market.yesShares + market.noShares).toFixed(2)} Crypo points 投入该预测
                   </p>
                   {new Date(market.deadline).getTime() > Date.now() && (
                     <button className="market-revoke-btn" onClick={() => requestRevokeVote(market)}>撤销我最近一票</button>
