@@ -40,6 +40,23 @@
 	- Output directory: `dist`
 4. 若要正式发布生产版本，执行：`vercel --prod`
 
+## Supabase 共享数据同步（防覆盖版）
+
+当前前端已升级为分表同步策略，包含：
+
+1. 分表存储：`shared_users`、`shared_markets`、`shared_secrets`、`shared_feedbacks`、`shared_settings`
+2. 乐观锁：每表使用 `version` 字段进行版本递增写入
+3. 空快照保护：拒绝把“全空集合快照”覆盖到已有数据
+
+首次启用请在 Supabase SQL Editor 执行：
+
+`supabase/shared_state_v2.sql`
+
+然后在环境变量中配置：
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
 ## 当前版本的重要限制
 
 当前版本的数据存储基于浏览器 `localStorage`，这意味着：

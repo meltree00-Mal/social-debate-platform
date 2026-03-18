@@ -25,7 +25,13 @@ interface ConfirmAction {
   title: string;
   message: string;
   confirmLabel: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
+}
+
+interface LoadingState {
+  type: 'market' | 'secret' | 'vote' | 'secret-view' | 'settlement' | 'revoke';
+  title: string;
+  message: string;
 }
 
 interface Secret {
@@ -87,8 +93,30 @@ interface SharedAppState {
   feedbacks: Feedback[];
   publicAnnouncement: string;
   testInviteCode: string;
-  siteLogoUrl: string;
 }
+
+type SharedCollectionKey = 'users' | 'markets' | 'secrets' | 'feedbacks' | 'settings';
+
+type SharedVersions = Record<SharedCollectionKey, number>;
+
+interface SharedSettingsState {
+  publicAnnouncement: string;
+  testInviteCode: string;
+}
+
+interface RemoteDocument<TPayload> {
+  payload: TPayload;
+  version: number;
+  updated_at: string;
+}
+
+interface PullSharedStateResult {
+  payload: Partial<SharedAppState>;
+  versions: SharedVersions;
+  maxUpdatedAt: number;
+}
+
+type PersistDocStatus = 'ok' | 'conflict' | 'error';
 
 const initialMarkets: Market[] = [
   { id: 1, question: "Will it rain tomorrow?", tag: '生活', createdAt: Date.now() - 2 * 60 * 1000, participants: [], followers: [], voteRecords: [], resultFeedbacks: [], b: 100, yesShares: 0, noShares: 0, yesPrice: 1, noPrice: 1, creator: "Admin", deadline: "2026-03-20" },
@@ -114,10 +142,32 @@ const PREDICTION_PUBLISH_FEE = 10;
 const SECRET_PUBLISH_FEE = 20;
 const MARKET_VOTE_COST = 1;
 const MARKET_VOTE_LIMIT = 5;
+const HOME_LOGO_URL = '/social-duixian-logo.png?v=20260317-1';
+
+const SHARED_TABLES: Record<SharedCollectionKey, string> = {
+  users: 'shared_users',
+  markets: 'shared_markets',
+  secrets: 'shared_secrets',
+  feedbacks: 'shared_feedbacks',
+  settings: 'shared_settings',
+};
+
+const emptyVersions = (): SharedVersions => ({
+  users: 0,
+  markets: 0,
+  secrets: 0,
+  feedbacks: 0,
+  settings: 0,
+});
 
 function App() {
   const remoteHydratingRef = useRef(false);
   const remoteSavingRef = useRef(false);
+  const lastLocalMutationAtRef = useRef(0);
+  const remoteVersionsRef = useRef<SharedVersions>(emptyVersions());
+  const lastPersistConflictAtRef = useRef(0);
+  const currentUserRef = useRef<User | null>(null);
+  const [hasCompletedInitialRemoteSync, setHasCompletedInitialRemoteSync] = useState(!isSupabaseEnabled);
 
   const normalizeMarket = (market: Partial<Market>): Market => ({
     id: typeof market.id === 'number' ? market.id : Date.now(),
@@ -312,7 +362,6 @@ function App() {
   const [testInviteCode, setTestInviteCode] = useState(() => localStorage.getItem('testInviteCode') ?? '');
   const [announcementDraft, setAnnouncementDraft] = useState(() => localStorage.getItem('publicAnnouncement') ?? '欢迎来到社交对线平台内测，欢迎提出改进建议。');
   const [inviteCodeDraft, setInviteCodeDraft] = useState(() => localStorage.getItem('testInviteCode') ?? '');
-  const [siteLogoUrl, setSiteLogoUrl] = useState(() => localStorage.getItem('siteLogoUrl') ?? '/social-duixian-logo.png');
   const [markets, setMarkets] = useState<Market[]>(() => {
     const saved = localStorage.getItem('markets');
     if (saved) {
@@ -325,6 +374,7 @@ function App() {
     m.forEach(calculatePrices);
     return m;
   });
+  const [loadingState, setLoadingState] = useState<LoadingState | null>(null);
 
   const applySharedState = (data: Partial<SharedAppState>) => {
     remoteHydratingRef.current = true;
@@ -351,27 +401,367 @@ function App() {
       setTestInviteCode(data.testInviteCode);
       setInviteCodeDraft(data.testInviteCode);
     }
-    if (typeof data.siteLogoUrl === 'string' && data.siteLogoUrl.trim()) {
-      setSiteLogoUrl(data.siteLogoUrl);
-    }
 
     window.setTimeout(() => {
       remoteHydratingRef.current = false;
     }, 0);
   };
 
-  const pullSharedState = async () => {
+  const isDangerousEmptySnapshot = (localSnapshot: SharedAppState, remotePayload: Partial<SharedAppState>) => {
+    const localTotalCount = localSnapshot.users.length
+      + localSnapshot.markets.length
+      + localSnapshot.secrets.length
+      + localSnapshot.feedbacks.length;
+
+    const hasLocalData = localTotalCount > 0;
+    const hasIncomingCollection = ['users', 'markets', 'secrets', 'feedbacks'].some((key) => key in remotePayload);
+
+    if (!hasLocalData || !hasIncomingCollection) {
+      return false;
+    }
+
+    const incomingUsers = Array.isArray(remotePayload.users) ? remotePayload.users.length : localSnapshot.users.length;
+    const incomingMarkets = Array.isArray(remotePayload.markets) ? remotePayload.markets.length : localSnapshot.markets.length;
+    const incomingSecrets = Array.isArray(remotePayload.secrets) ? remotePayload.secrets.length : localSnapshot.secrets.length;
+    const incomingFeedbacks = Array.isArray(remotePayload.feedbacks) ? remotePayload.feedbacks.length : localSnapshot.feedbacks.length;
+
+    return incomingUsers + incomingMarkets + incomingSecrets + incomingFeedbacks === 0;
+  };
+
+  const applyRemoteSharedState = (remotePayload: Partial<SharedAppState>, remoteUpdatedAt: number, force = false) => {
+    if (!force && remoteUpdatedAt > 0 && remoteUpdatedAt <= lastLocalMutationAtRef.current) {
+      setHasCompletedInitialRemoteSync(true);
+      return false;
+    }
+
+    const localSnapshot: SharedAppState = {
+      users,
+      markets,
+      secrets,
+      feedbacks,
+      publicAnnouncement,
+      testInviteCode,
+    };
+
+    if (!force && isDangerousEmptySnapshot(localSnapshot, remotePayload)) {
+      setHasCompletedInitialRemoteSync(true);
+      return false;
+    }
+
+    const activeUser = currentUserRef.current;
+    if (activeUser && Array.isArray(remotePayload.users)) {
+      const stillExists = remotePayload.users.some(user =>
+        (typeof user.id === 'number' && user.id === activeUser.id)
+        || (typeof user.name === 'string' && user.name.trim().toLowerCase() === activeUser.name.trim().toLowerCase())
+      );
+
+      if (!stillExists) {
+        setHasCompletedInitialRemoteSync(true);
+        return false;
+      }
+    }
+
+    applySharedState(remotePayload);
+    setHasCompletedInitialRemoteSync(true);
+    return true;
+  };
+
+  const pullSharedDocuments = async (): Promise<PullSharedStateResult | null> => {
+    if (!isSupabaseEnabled || !supabase) return null;
+
+    const client = supabase;
+    const [usersRes, marketsRes, secretsRes, feedbacksRes, settingsRes] = await Promise.all([
+      client.from(SHARED_TABLES.users).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+      client.from(SHARED_TABLES.markets).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+      client.from(SHARED_TABLES.secrets).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+      client.from(SHARED_TABLES.feedbacks).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+      client.from(SHARED_TABLES.settings).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+    ]);
+
+    const responses = [usersRes, marketsRes, secretsRes, feedbacksRes, settingsRes];
+    const hasSchemaError = responses.some(res => Boolean(res.error));
+    if (hasSchemaError) {
+      return null;
+    }
+
+    const usersDoc = usersRes.data as RemoteDocument<Partial<User>[]> | null;
+    const marketsDoc = marketsRes.data as RemoteDocument<Partial<Market>[]> | null;
+    const secretsDoc = secretsRes.data as RemoteDocument<Partial<Secret>[]> | null;
+    const feedbacksDoc = feedbacksRes.data as RemoteDocument<Feedback[]> | null;
+    const settingsDoc = settingsRes.data as RemoteDocument<SharedSettingsState> | null;
+
+    const payload: Partial<SharedAppState> = {};
+
+    if (usersDoc && Array.isArray(usersDoc.payload)) {
+      payload.users = usersDoc.payload.map(normalizeUser);
+    }
+    if (marketsDoc && Array.isArray(marketsDoc.payload)) {
+      const normalizedMarkets = marketsDoc.payload.map(normalizeMarket);
+      normalizedMarkets.forEach((market: Market) => calculatePrices(market));
+      payload.markets = normalizedMarkets;
+    }
+    if (secretsDoc && Array.isArray(secretsDoc.payload)) {
+      payload.secrets = secretsDoc.payload.map(normalizeSecret);
+    }
+    if (feedbacksDoc && Array.isArray(feedbacksDoc.payload)) {
+      payload.feedbacks = feedbacksDoc.payload;
+    }
+    if (settingsDoc?.payload && typeof settingsDoc.payload === 'object') {
+      if (typeof settingsDoc.payload.publicAnnouncement === 'string') {
+        payload.publicAnnouncement = settingsDoc.payload.publicAnnouncement;
+      }
+      if (typeof settingsDoc.payload.testInviteCode === 'string') {
+        payload.testInviteCode = settingsDoc.payload.testInviteCode;
+      }
+    }
+
+    const versions: SharedVersions = {
+      users: usersDoc?.version ?? 0,
+      markets: marketsDoc?.version ?? 0,
+      secrets: secretsDoc?.version ?? 0,
+      feedbacks: feedbacksDoc?.version ?? 0,
+      settings: settingsDoc?.version ?? 0,
+    };
+
+    const maxUpdatedAt = [usersDoc, marketsDoc, secretsDoc, feedbacksDoc, settingsDoc]
+      .map(doc => (doc?.updated_at ? new Date(doc.updated_at).getTime() : 0))
+      .reduce((max, value) => Math.max(max, value), 0);
+
+    return { payload, versions, maxUpdatedAt };
+  };
+
+  const pullSharedState = async (force = false) => {
     if (!isSupabaseEnabled || !supabase) return;
 
-    const { data, error } = await supabase
-      .from('shared_state')
-      .select('payload')
+    const pulled = await pullSharedDocuments();
+    if (!pulled) {
+      setHasCompletedInitialRemoteSync(true);
+      return;
+    }
+
+    remoteVersionsRef.current = pulled.versions;
+    if (Object.keys(pulled.payload).length > 0) {
+      applyRemoteSharedState(pulled.payload, pulled.maxUpdatedAt, force);
+      return;
+    }
+
+    setHasCompletedInitialRemoteSync(true);
+  };
+
+  const buildSharedStatePayload = (overrides: Partial<SharedAppState> = {}): SharedAppState => ({
+    users: overrides.users ?? users,
+    markets: overrides.markets ?? markets,
+    secrets: overrides.secrets ?? secrets,
+    feedbacks: overrides.feedbacks ?? feedbacks,
+    publicAnnouncement: overrides.publicAnnouncement ?? publicAnnouncement,
+    testInviteCode: overrides.testInviteCode ?? testInviteCode,
+  });
+
+  const getSyncFailureMessage = (defaultMessage: string) => {
+    const justHadConflict = Date.now() - lastPersistConflictAtRef.current <= 5000;
+    if (justHadConflict) {
+      return '检测到并发更新，已自动拉取最新数据。请重试一次以完成操作。';
+    }
+    return defaultMessage;
+  };
+
+  const logSyncConflict = (tableName: string, attemptedVersion: number) => {
+    if (!supabase) return;
+    const userName = currentUserRef.current?.name ?? null;
+    void supabase
+      .from('sync_conflict_log')
+      .insert({ table_name: tableName, attempted_version: attemptedVersion, user_name: userName, occurred_at: new Date().toISOString() });
+  };
+
+  const persistDocumentWithVersion = async <TPayload,>(
+    tableName: string,
+    key: SharedCollectionKey,
+    payload: TPayload,
+  ): Promise<PersistDocStatus> => {
+    if (!supabase) return 'error';
+
+    const client = supabase;
+    const nowIso = new Date().toISOString();
+
+    const { data: currentRow, error: currentError } = await client
+      .from(tableName)
+      .select('version')
       .eq('id', 1)
       .maybeSingle();
 
-    if (error || !data?.payload) return;
-    applySharedState(data.payload as Partial<SharedAppState>);
+    if (currentError) {
+      return 'error';
+    }
+
+    const currentVersion = typeof currentRow?.version === 'number' ? currentRow.version : 0;
+    const nextVersion = currentVersion + 1;
+
+    if (currentVersion === 0) {
+      const { error: insertError } = await client
+        .from(tableName)
+        .upsert({ id: 1, payload, version: 1, updated_at: nowIso }, { onConflict: 'id' });
+
+      if (insertError) {
+        return 'error';
+      }
+
+      remoteVersionsRef.current[key] = 1;
+      return 'ok';
+    }
+
+    const { data: updatedRow, error: updateError } = await client
+      .from(tableName)
+      .update({ payload, version: nextVersion, updated_at: nowIso })
+      .eq('id', 1)
+      .eq('version', currentVersion)
+      .select('version')
+      .maybeSingle();
+
+    if (updateError) {
+      return 'error';
+    }
+
+    if (!updatedRow || typeof updatedRow.version !== 'number') {
+      logSyncConflict(tableName, currentVersion);
+      return 'conflict';
+    }
+
+    remoteVersionsRef.current[key] = updatedRow.version;
+    return 'ok';
   };
+
+  const persistSharedState = async (overrides: Partial<SharedAppState> = {}, hasRetried = false): Promise<boolean> => {
+    if (!isSupabaseEnabled || !supabase) {
+      return true;
+    }
+
+    const nextSnapshot = buildSharedStatePayload(overrides);
+    const existingTotalCount = users.length + markets.length + secrets.length + feedbacks.length;
+    const nextTotalCount = nextSnapshot.users.length
+      + nextSnapshot.markets.length
+      + nextSnapshot.secrets.length
+      + nextSnapshot.feedbacks.length;
+
+    if (existingTotalCount > 0 && nextTotalCount === 0) {
+      return false;
+    }
+
+    const shouldSaveUsers = Object.prototype.hasOwnProperty.call(overrides, 'users');
+    const shouldSaveMarkets = Object.prototype.hasOwnProperty.call(overrides, 'markets');
+    const shouldSaveSecrets = Object.prototype.hasOwnProperty.call(overrides, 'secrets');
+    const shouldSaveFeedbacks = Object.prototype.hasOwnProperty.call(overrides, 'feedbacks');
+    const shouldSaveSettings = Object.prototype.hasOwnProperty.call(overrides, 'publicAnnouncement')
+      || Object.prototype.hasOwnProperty.call(overrides, 'testInviteCode');
+
+    const saveAll = Object.keys(overrides).length === 0;
+
+    remoteSavingRef.current = true;
+    const updatedAt = new Date().toISOString();
+    lastLocalMutationAtRef.current = new Date(updatedAt).getTime();
+
+    const writeResults = await Promise.all([
+      (saveAll || shouldSaveUsers)
+        ? persistDocumentWithVersion(SHARED_TABLES.users, 'users', nextSnapshot.users)
+        : Promise.resolve('ok' as PersistDocStatus),
+      (saveAll || shouldSaveMarkets)
+        ? persistDocumentWithVersion(SHARED_TABLES.markets, 'markets', nextSnapshot.markets)
+        : Promise.resolve('ok' as PersistDocStatus),
+      (saveAll || shouldSaveSecrets)
+        ? persistDocumentWithVersion(SHARED_TABLES.secrets, 'secrets', nextSnapshot.secrets)
+        : Promise.resolve('ok' as PersistDocStatus),
+      (saveAll || shouldSaveFeedbacks)
+        ? persistDocumentWithVersion(SHARED_TABLES.feedbacks, 'feedbacks', nextSnapshot.feedbacks)
+        : Promise.resolve('ok' as PersistDocStatus),
+      (saveAll || shouldSaveSettings)
+        ? persistDocumentWithVersion(SHARED_TABLES.settings, 'settings', {
+          publicAnnouncement: nextSnapshot.publicAnnouncement,
+          testInviteCode: nextSnapshot.testInviteCode,
+        } satisfies SharedSettingsState)
+        : Promise.resolve('ok' as PersistDocStatus),
+    ]);
+
+    remoteSavingRef.current = false;
+
+    const hasConflict = writeResults.some(result => result === 'conflict');
+    const hasError = writeResults.some(result => result === 'error');
+
+    if (hasConflict) {
+      lastPersistConflictAtRef.current = Date.now();
+      await pullSharedState(true);
+      if (!hasRetried) {
+        return persistSharedState(overrides, true);
+      }
+      return false;
+    }
+
+    if (hasError) {
+      return false;
+    }
+
+    await pullSharedState(true);
+    return true;
+  };
+
+  const applyCreditDelta = (
+    userList: User[],
+    userName: string,
+    delta: number,
+    reason: string,
+    activeUserName?: string | null,
+  ) => {
+    const timestamp = Date.now();
+    let nextCurrentUser: User | null = null;
+
+    const nextUsers = userList.map(user => {
+      if (user.name !== userName) return user;
+
+      const balanceAfter = user.credit + delta;
+      const record: CreditRecord = {
+        id: timestamp + Math.floor(Math.random() * 1000),
+        delta,
+        reason,
+        balanceAfter,
+        createdAt: timestamp,
+      };
+
+      const nextUser = {
+        ...user,
+        credit: balanceAfter,
+        creditHistory: [record, ...user.creditHistory].slice(0, 100),
+      };
+
+      if (activeUserName === userName) {
+        nextCurrentUser = nextUser;
+      }
+
+      return nextUser;
+    });
+
+    return { nextUsers, nextCurrentUser };
+  };
+
+  const applyCreditChanges = (
+    userList: User[],
+    changes: Array<{ userName: string; delta: number; reason: string }>,
+    activeUserName?: string | null,
+  ) => {
+    let nextUsers = userList;
+    let nextCurrentUser: User | null = null;
+
+    changes.forEach(change => {
+      const result = applyCreditDelta(nextUsers, change.userName, change.delta, change.reason, activeUserName);
+      nextUsers = result.nextUsers;
+      if (result.nextCurrentUser) {
+        nextCurrentUser = result.nextCurrentUser;
+      }
+    });
+
+    return { nextUsers, nextCurrentUser };
+  };
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem('users', JSON.stringify(users));
@@ -406,10 +796,6 @@ function App() {
   }, [testInviteCode]);
 
   useEffect(() => {
-    localStorage.setItem('siteLogoUrl', siteLogoUrl);
-  }, [siteLogoUrl]);
-
-  useEffect(() => {
     if (!isSupabaseEnabled || !supabase) return;
 
     pullSharedState();
@@ -417,35 +803,24 @@ function App() {
       pullSharedState();
     }, 5000);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
     if (!isSupabaseEnabled || !supabase) return;
+    if (!hasCompletedInitialRemoteSync) return;
     if (remoteHydratingRef.current || remoteSavingRef.current) return;
-    const client = supabase;
+
+    lastLocalMutationAtRef.current = Date.now();
 
     const saveSharedState = async () => {
-      remoteSavingRef.current = true;
-      const payload: SharedAppState = {
-        users,
-        markets,
-        secrets,
-        feedbacks,
-        publicAnnouncement,
-        testInviteCode,
-        siteLogoUrl,
-      };
-
-      await client
-        .from('shared_state')
-        .upsert({ id: 1, payload, updated_at: new Date().toISOString() });
-
-      remoteSavingRef.current = false;
+      await persistSharedState();
     };
 
-    saveSharedState();
-  }, [users, markets, secrets, feedbacks, publicAnnouncement, testInviteCode, siteLogoUrl]);
+    void saveSharedState();
+  }, [users, markets, secrets, feedbacks, publicAnnouncement, testInviteCode, hasCompletedInitialRemoteSync]);
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -598,30 +973,11 @@ function App() {
   const updateUserCredit = (userName: string, delta: number, reason: string) => {
     let updatedCurrent: User | null = null;
 
-    setUsers(prev => prev.map(user => {
-      if (user.name !== userName) return user;
-
-      const balanceAfter = user.credit + delta;
-      const record: CreditRecord = {
-        id: Date.now() + Math.floor(Math.random() * 1000),
-        delta,
-        reason,
-        balanceAfter,
-        createdAt: Date.now(),
-      };
-
-      const nextUser = {
-        ...user,
-        credit: balanceAfter,
-        creditHistory: [record, ...user.creditHistory].slice(0, 100),
-      };
-
-      if (currentUser?.name === userName) {
-        updatedCurrent = nextUser;
-      }
-
-      return nextUser;
-    }));
+    setUsers(prev => {
+      const result = applyCreditDelta(prev, userName, delta, reason, currentUser?.name);
+      updatedCurrent = result.nextCurrentUser;
+      return result.nextUsers;
+    });
 
     if (updatedCurrent) {
       setCurrentUser(updatedCurrent);
@@ -760,50 +1116,65 @@ function App() {
     alert('测试公告已更新。');
   };
 
-  const handleSiteLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const publishMarket = async () => {
+    if (!currentUser || !newQuestion.trim() || !newDeadline) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setSiteLogoUrl(reader.result);
-        alert('首页图片已更新。');
-      }
+    if (currentUser.credit < PREDICTION_PUBLISH_FEE) {
+      alert(`Publishing a prediction requires ${PREDICTION_PUBLISH_FEE} Crypo points.`);
+      return;
+    }
+
+    const question = newQuestion.trim();
+    const createdAt = Date.now();
+    const { nextUsers, nextCurrentUser } = applyCreditDelta(
+      users,
+      currentUser.name,
+      -PREDICTION_PUBLISH_FEE,
+      `Publish prediction: ${question}`,
+      currentUser.name,
+    );
+
+    const newMarket: Market = {
+      id: createdAt,
+      question,
+      tag: newTag,
+      createdAt,
+      participants: [],
+      followers: [],
+      voteRecords: [],
+      resultFeedbacks: [],
+      b: 100,
+      yesShares: 0,
+      noShares: 0,
+      yesPrice: 1,
+      noPrice: 1,
+      creator: currentUser.name,
+      deadline: newDeadline,
     };
-    reader.readAsDataURL(file);
-  };
+    const nextMarkets = [newMarket, ...markets];
 
-  const publishMarket = () => {
-    if (currentUser && newQuestion.trim() && newDeadline) {
-      if (currentUser.credit < PREDICTION_PUBLISH_FEE) {
-        alert(`Publishing a prediction requires ${PREDICTION_PUBLISH_FEE} Crypo points.`);
-        return;
+    setLoadingState({
+      type: 'market',
+      title: '正在发布预测',
+      message: '正在同步预测内容和积分变更，主页更新后会自动关闭。',
+    });
+
+    setUsers(nextUsers);
+    if (nextCurrentUser) {
+      setCurrentUser(nextCurrentUser);
+    }
+    setMarkets(nextMarkets);
+    setNewQuestion('');
+    setNewTag('政治');
+    setNewDeadline('');
+
+    try {
+      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      if (!didPersist) {
+        alert(getSyncFailureMessage('预测已发布到当前页面，但同步到主页失败，请稍后刷新确认。'));
       }
-
-      updateUserCredit(currentUser.name, -PREDICTION_PUBLISH_FEE, `Publish prediction: ${newQuestion.trim()}`);
-
-      const newMarket: Market = {
-        id: Date.now(),
-        question: newQuestion.trim(),
-        tag: newTag,
-        createdAt: Date.now(),
-        participants: [],
-        followers: [],
-        voteRecords: [],
-        resultFeedbacks: [],
-        b: 100,
-        yesShares: 0,
-        noShares: 0,
-        yesPrice: 1,
-        noPrice: 1,
-        creator: currentUser.name,
-        deadline: newDeadline,
-      };
-      setMarkets(prev => [newMarket, ...prev]);
-      setNewQuestion('');
-      setNewTag('政治');
-      setNewDeadline('');
+    } finally {
+      setLoadingState(null);
     }
   };
 
@@ -895,30 +1266,60 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const shareSecret = () => {
-    if (currentUser && newTitle.trim() && newSecret.trim()) {
-      if (currentUser.credit < SECRET_PUBLISH_FEE) {
-        alert(`Publishing a secret requires ${SECRET_PUBLISH_FEE} Crypo points.`);
-        return;
+  const shareSecret = async () => {
+    if (!currentUser || !newTitle.trim() || !newSecret.trim()) return;
+
+    if (currentUser.credit < SECRET_PUBLISH_FEE) {
+      alert(`Publishing a secret requires ${SECRET_PUBLISH_FEE} Crypo points.`);
+      return;
+    }
+
+    const title = newTitle.trim();
+    const content = newSecret.trim();
+    const createdAt = Date.now();
+    const { nextUsers, nextCurrentUser } = applyCreditDelta(
+      users,
+      currentUser.name,
+      -SECRET_PUBLISH_FEE,
+      `Publish secret: ${title}`,
+      currentUser.name,
+    );
+
+    const secret: Secret = {
+      id: createdAt,
+      title,
+      content,
+      author: currentUser.name,
+      price: newSecretPrice,
+      imageUrl: newSecretImage ?? undefined,
+      createdAt,
+      ratings: [],
+    };
+    const nextSecrets = [secret, ...secrets];
+
+    setLoadingState({
+      type: 'secret',
+      title: '正在发布秘密',
+      message: '正在同步秘密内容和积分变更，列表更新后会自动关闭。',
+    });
+
+    setUsers(nextUsers);
+    if (nextCurrentUser) {
+      setCurrentUser(nextCurrentUser);
+    }
+    setSecrets(nextSecrets);
+    setNewTitle('');
+    setNewSecret('');
+    setNewSecretImage(null);
+    setNewSecretPrice(1);
+
+    try {
+      const didPersist = await persistSharedState({ users: nextUsers, secrets: nextSecrets });
+      if (!didPersist) {
+        alert(getSyncFailureMessage('秘密已发布到当前页面，但同步到主页失败，请稍后刷新确认。'));
       }
-
-      updateUserCredit(currentUser.name, -SECRET_PUBLISH_FEE, `Publish secret: ${newTitle.trim()}`);
-
-      const secret: Secret = {
-        id: Date.now(),
-        title: newTitle.trim(),
-        content: newSecret.trim(),
-        author: currentUser.name,
-        price: newSecretPrice,
-        imageUrl: newSecretImage ?? undefined,
-        createdAt: Date.now(),
-        ratings: [],
-      };
-      setSecrets(prev => [secret, ...prev]);
-      setNewTitle('');
-      setNewSecret('');
-      setNewSecretImage(null);
-      setNewSecretPrice(1);
+    } finally {
+      setLoadingState(null);
     }
   };
 
@@ -976,7 +1377,7 @@ function App() {
     }
   };
 
-  const viewSecret = (secretId: number) => {
+  const viewSecret = async (secretId: number) => {
     const secret = secrets.find(s => s.id === secretId);
     if (!secret) return;
     if (!currentUser) return;
@@ -988,10 +1389,35 @@ function App() {
     }
 
     if (currentUser.credit >= secret.price) {
-      updateUserCredit(currentUser.name, -secret.price, `View secret: ${secret.title}`);
-      updateUserCredit(secret.author, secret.price, `Secret income: ${secret.title}`);
+      const { nextUsers, nextCurrentUser } = applyCreditChanges(
+        users,
+        [
+          { userName: currentUser.name, delta: -secret.price, reason: `View secret: ${secret.title}` },
+          { userName: secret.author, delta: secret.price, reason: `Secret income: ${secret.title}` },
+        ],
+        currentUser.name,
+      );
 
+      setLoadingState({
+        type: 'secret-view',
+        title: '正在解锁秘密',
+        message: '正在同步积分扣费和秘密权限，内容准备完成后会自动展示。',
+      });
+
+      setUsers(nextUsers);
+      if (nextCurrentUser) {
+        setCurrentUser(nextCurrentUser);
+      }
       setViewedSecrets(prev => new Set(prev).add(secretId));
+
+      try {
+        const didPersist = await persistSharedState({ users: nextUsers });
+        if (!didPersist) {
+          alert(getSyncFailureMessage('秘密已在当前页面解锁，但积分同步失败，请稍后刷新确认。'));
+        }
+      } finally {
+        setLoadingState(null);
+      }
     } else {
       alert('Insufficient Crypo points');
     }
@@ -1038,49 +1464,82 @@ function App() {
     }));
   };
 
-  const buyShare = (marketId: number, outcome: 'yes' | 'no') => {
+  const buyShare = async (marketId: number, outcome: 'yes' | 'no') => {
     if (!currentUser) return;
 
-    setMarkets(prev => prev.map(market => {
-      if (market.id === marketId) {
-        if (market.resolvedOutcome) {
-          alert('该预测已结算，无法继续投票。');
-          return market;
-        }
+    if (currentUser.credit < MARKET_VOTE_COST) {
+      alert('Insufficient Crypo points');
+      return;
+    }
 
-        if (new Date(market.deadline).getTime() <= Date.now()) {
-          alert('该预测已截止，无法继续投票。');
-          return market;
-        }
+    const voteTimestamp = Date.now();
+    let didVote = false;
+    const nextMarkets = markets.map(market => {
+      if (market.id !== marketId) return market;
 
-        const myVotes = market.voteRecords.filter(record => record.user === currentUser.name && record.status === 'active').length;
-        if (myVotes >= MARKET_VOTE_LIMIT) {
-          alert(`你在该预测的投票已达到上限（${MARKET_VOTE_LIMIT} 次）。`);
-          return market;
-        }
-
-        if (currentUser.credit >= MARKET_VOTE_COST) {
-          updateUserCredit(currentUser.name, -MARKET_VOTE_COST, `Vote ${outcome.toUpperCase()} on prediction`);
-          const newMarket = { ...market };
-          if (outcome === 'yes') {
-            newMarket.yesShares += 1;
-          } else {
-            newMarket.noShares += 1;
-          }
-          if (!newMarket.participants.includes(currentUser.name)) {
-            newMarket.participants = [...newMarket.participants, currentUser.name];
-          }
-          newMarket.voteRecords = [
-            ...newMarket.voteRecords,
-            { id: Date.now() + Math.floor(Math.random() * 1000), user: currentUser.name, outcome, createdAt: Date.now(), status: 'active' },
-          ];
-          return newMarket;
-        } else {
-          alert('Insufficient Crypo points');
-        }
+      if (market.resolvedOutcome) {
+        alert('该预测已结算，无法继续投票。');
+        return market;
       }
-      return market;
-    }));
+
+      if (new Date(market.deadline).getTime() <= Date.now()) {
+        alert('该预测已截止，无法继续投票。');
+        return market;
+      }
+
+      const myVotes = market.voteRecords.filter(record => record.user === currentUser.name && record.status === 'active').length;
+      if (myVotes >= MARKET_VOTE_LIMIT) {
+        alert(`你在该预测的投票已达到上限（${MARKET_VOTE_LIMIT} 次）。`);
+        return market;
+      }
+
+      const nextMarket = { ...market };
+      if (outcome === 'yes') {
+        nextMarket.yesShares += 1;
+      } else {
+        nextMarket.noShares += 1;
+      }
+      if (!nextMarket.participants.includes(currentUser.name)) {
+        nextMarket.participants = [...nextMarket.participants, currentUser.name];
+      }
+      nextMarket.voteRecords = [
+        ...nextMarket.voteRecords,
+        { id: voteTimestamp + Math.floor(Math.random() * 1000), user: currentUser.name, outcome, createdAt: voteTimestamp, status: 'active' },
+      ];
+      didVote = true;
+      return nextMarket;
+    });
+
+    if (!didVote) {
+      return;
+    }
+
+    const { nextUsers, nextCurrentUser } = applyCreditChanges(
+      users,
+      [{ userName: currentUser.name, delta: -MARKET_VOTE_COST, reason: `Vote ${outcome.toUpperCase()} on prediction` }],
+      currentUser.name,
+    );
+
+    setLoadingState({
+      type: 'vote',
+      title: '正在提交投票',
+      message: '正在同步投票结果和积分扣费，预测主页更新后会自动关闭。',
+    });
+
+    setUsers(nextUsers);
+    if (nextCurrentUser) {
+      setCurrentUser(nextCurrentUser);
+    }
+    setMarkets(nextMarkets);
+
+    try {
+      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      if (!didPersist) {
+        alert(getSyncFailureMessage('投票已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
+      }
+    } finally {
+      setLoadingState(null);
+    }
   };
 
   const requestBuyShare = (market: Market, outcome: 'yes' | 'no') => {
@@ -1125,7 +1584,7 @@ function App() {
     return { activeVotes, correctVotes, rewardPerCorrectVote, userRewards };
   };
 
-  const settleMarket = (marketId: number, outcome: 'yes' | 'no') => {
+  const settleMarket = async (marketId: number, outcome: 'yes' | 'no') => {
     if (!currentUser) return;
 
     const market = markets.find(item => item.id === marketId);
@@ -1140,22 +1599,41 @@ function App() {
     const nextRewards = calculateSettlementRewards(market, outcome).userRewards;
     const allUsers = new Set([...Object.keys(previousRewards), ...Object.keys(nextRewards)]);
 
-    allUsers.forEach(userName => {
-      const delta = (nextRewards[userName] ?? 0) - (previousRewards[userName] ?? 0);
-      if (delta !== 0) {
-        updateUserCredit(
-          userName,
-          delta,
-          market.resolvedOutcome ? `Prediction result adjustment: ${market.question}` : `Prediction reward: ${market.question}`,
-        );
-      }
-    });
+    const creditChanges = [...allUsers]
+      .map(userName => ({
+        userName,
+        delta: (nextRewards[userName] ?? 0) - (previousRewards[userName] ?? 0),
+        reason: market.resolvedOutcome ? `Prediction result adjustment: ${market.question}` : `Prediction reward: ${market.question}`,
+      }))
+      .filter(change => change.delta !== 0);
 
-    setMarkets(prev => prev.map(item => item.id === marketId ? {
+    const { nextUsers, nextCurrentUser } = applyCreditChanges(users, creditChanges, currentUser.name);
+    const nextMarkets = markets.map(item => item.id === marketId ? {
       ...item,
       resolvedOutcome: outcome,
       resolvedAt: Date.now(),
-    } : item));
+    } : item);
+
+    setLoadingState({
+      type: 'settlement',
+      title: market.resolvedOutcome ? '正在修改最终结果' : '正在发布最终结果',
+      message: '正在同步结算结果和奖励分配，预测主页更新后会自动关闭。',
+    });
+
+    setUsers(nextUsers);
+    if (nextCurrentUser) {
+      setCurrentUser(nextCurrentUser);
+    }
+    setMarkets(nextMarkets);
+
+    try {
+      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      if (!didPersist) {
+        alert(getSyncFailureMessage('最终结果已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
+      }
+    } finally {
+      setLoadingState(null);
+    }
   };
 
   const requestSettleMarket = (market: Market, outcome: 'yes' | 'no') => {
@@ -1209,12 +1687,13 @@ function App() {
     }));
   };
 
-  const revokeLatestVote = (marketId: number) => {
+  const revokeLatestVote = async (marketId: number) => {
     if (!currentUser) return;
 
     let revoked = false;
 
-    setMarkets(prev => prev.map(market => {
+    const revokeTimestamp = Date.now();
+    const nextMarkets = markets.map(market => {
       if (market.id !== marketId) return market;
 
       const activeIndexes = market.voteRecords
@@ -1229,7 +1708,7 @@ function App() {
       const target = activeIndexes[0];
       const newVoteRecords: Market['voteRecords'] = market.voteRecords.map((record, index) => {
         if (index !== target.index) return record;
-        return { ...record, status: 'revoked' as const, revokedAt: Date.now() };
+        return { ...record, status: 'revoked' as const, revokedAt: revokeTimestamp };
       });
 
       const nextMarket = { ...market, voteRecords: newVoteRecords };
@@ -1241,10 +1720,35 @@ function App() {
 
       revoked = true;
       return nextMarket;
-    }));
+    });
 
     if (revoked) {
-      updateUserCredit(currentUser.name, MARKET_VOTE_COST, 'Revoke vote refund');
+      const { nextUsers, nextCurrentUser } = applyCreditChanges(
+        users,
+        [{ userName: currentUser.name, delta: MARKET_VOTE_COST, reason: 'Revoke vote refund' }],
+        currentUser.name,
+      );
+
+      setLoadingState({
+        type: 'revoke',
+        title: '正在撤销投票',
+        message: '正在同步撤票记录和积分返还，预测主页更新后会自动关闭。',
+      });
+
+      setUsers(nextUsers);
+      if (nextCurrentUser) {
+        setCurrentUser(nextCurrentUser);
+      }
+      setMarkets(nextMarkets);
+
+      try {
+        const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+        if (!didPersist) {
+          alert(getSyncFailureMessage('撤销投票已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
+        }
+      } finally {
+        setLoadingState(null);
+      }
     } else {
       alert('你还没有可撤销的投票。');
     }
@@ -1553,11 +2057,6 @@ function App() {
           placeholder="输入测试邀请码（可选）"
         />
         <button onClick={saveTestingNotice}>保存公告</button>
-        <label>
-          上传首页图片
-          <input type="file" accept="image/*" onChange={handleSiteLogoUpload} />
-        </label>
-        <button onClick={() => setSiteLogoUrl('/social-duixian-logo.png')}>恢复默认图片</button>
       </div>
     </div>
   );
@@ -1580,11 +2079,19 @@ function App() {
 
   return (
     <div className={`app${activeTab === 'secret' ? ' secret-mode' : ''}`}>
-      <h1>社交对线平台</h1>
+      {loadingState && (
+        <div className="loading-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="loading-modal">
+            <div className="loading-spinner" />
+            <h3>{loadingState.title}</h3>
+            <p>{loadingState.message}</p>
+          </div>
+        </div>
+      )}
       <div className="home-logo-wrap">
         <img
           className="home-logo"
-          src={siteLogoUrl}
+          src={HOME_LOGO_URL}
           alt="社交对线平台 Logo"
         />
       </div>
@@ -1839,7 +2346,7 @@ function App() {
                   </label>
                 </div>
                 <div className="prediction-action-row">
-                  <button onClick={requestPublishMarket}>发布</button>
+                  <button disabled={Boolean(loadingState)} onClick={requestPublishMarket}>发布</button>
                 </div>
               </div>
               <div className="market-toolbar">
@@ -2141,7 +2648,7 @@ function App() {
                       <option value={5}>5 Crypo points</option>
                       <option value={10}>10 Crypo points</option>
                     </select>
-                    <button className="share-btn" onClick={requestShareSecret}>发布</button>
+                    <button className="share-btn" disabled={Boolean(loadingState)} onClick={requestShareSecret}>发布</button>
                   </div>
                 </div>
               </div>
