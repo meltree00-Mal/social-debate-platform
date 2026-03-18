@@ -1,5 +1,20 @@
 -- Split shared state into per-domain documents with optimistic-lock versioning.
 
+-- Clean up legacy shared_state policies when they already exist to avoid duplicate-policy errors.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'shared_state'
+  ) then
+    execute 'drop policy if exists "allow read" on public.shared_state';
+    execute 'drop policy if exists "allow write" on public.shared_state';
+  end if;
+end
+$$;
+
 create table if not exists public.shared_users (
   id bigint primary key,
   payload jsonb not null default '[]'::jsonb,
@@ -60,6 +75,102 @@ create table if not exists public.sync_conflict_log (
   user_name text,
   occurred_at timestamptz not null default now()
 );
+
+-- Enable RLS and create permissive prototype policies idempotently.
+alter table public.shared_users enable row level security;
+alter table public.shared_markets enable row level security;
+alter table public.shared_secrets enable row level security;
+alter table public.shared_feedbacks enable row level security;
+alter table public.shared_settings enable row level security;
+alter table public.sync_conflict_log enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_users' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.shared_users for select using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_users' and policyname = 'allow write'
+  ) then
+    create policy "allow write" on public.shared_users for all using (true) with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_markets' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.shared_markets for select using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_markets' and policyname = 'allow write'
+  ) then
+    create policy "allow write" on public.shared_markets for all using (true) with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_secrets' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.shared_secrets for select using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_secrets' and policyname = 'allow write'
+  ) then
+    create policy "allow write" on public.shared_secrets for all using (true) with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_feedbacks' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.shared_feedbacks for select using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_feedbacks' and policyname = 'allow write'
+  ) then
+    create policy "allow write" on public.shared_feedbacks for all using (true) with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_settings' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.shared_settings for select using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shared_settings' and policyname = 'allow write'
+  ) then
+    create policy "allow write" on public.shared_settings for all using (true) with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'sync_conflict_log' and policyname = 'allow insert'
+  ) then
+    create policy "allow insert" on public.sync_conflict_log for insert with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'sync_conflict_log' and policyname = 'allow read'
+  ) then
+    create policy "allow read" on public.sync_conflict_log for select using (true);
+  end if;
+end
+$$;
 
 -- Optional: migrate legacy monolithic shared_state row if it exists.
 do $$
