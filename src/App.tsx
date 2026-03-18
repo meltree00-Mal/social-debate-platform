@@ -39,6 +39,14 @@ interface LoadingState {
   message: string;
 }
 
+interface SecretGossip {
+  id: number;
+  user: string;
+  text: string;
+  imageUrl?: string;
+  createdAt: number;
+}
+
 interface Secret {
   id: number;
   title: string;
@@ -48,6 +56,7 @@ interface Secret {
   imageUrl?: string;
   createdAt: number;
   ratings: { user: string; authenticity: '真实' | '不真实'; value: '值得' | '不值得' }[];
+  gossips: SecretGossip[];
 }
 
 interface Market {
@@ -252,6 +261,12 @@ function App() {
         && (rating.value === '值得' || rating.value === '不值得')
     );
 
+    const normalizedGossips: SecretGossip[] = Array.isArray(secret.gossips)
+      ? secret.gossips.filter((g): g is SecretGossip =>
+          Boolean(g && typeof g.id === 'number' && typeof g.user === 'string' && typeof g.text === 'string')
+        )
+      : [];
+
     return {
       id: typeof secret.id === 'number' ? secret.id : Date.now(),
       title: typeof secret.title === 'string' ? secret.title : 'Untitled',
@@ -263,6 +278,7 @@ function App() {
         ? secret.createdAt
         : (typeof secret.id === 'number' ? secret.id : Date.now()),
       ratings: normalizedRatings,
+      gossips: normalizedGossips,
     };
   };
 
@@ -357,6 +373,9 @@ function App() {
   const [editSecretPrice, setEditSecretPrice] = useState(1);
   const [secretSort, setSecretSort] = useState<'latest' | 'oldest' | 'price-high' | 'price-low'>('latest');
   const [secretTimeFilter, setSecretTimeFilter] = useState<'all' | 'today' | 'week'>('all');
+  const [secretDetailId, setSecretDetailId] = useState<number | null>(null);
+  const [gossipText, setGossipText] = useState('');
+  const [gossipImage, setGossipImage] = useState<string | null>(null);
   const [creditHistoryFilter, setCreditHistoryFilter] = useState<'all' | 'recharge' | 'publish' | 'vote' | 'secret-income' | 'other'>('all');
   const [pendingAction, setPendingAction] = useState<ConfirmAction | null>(null);
   const [pendingVoteChoice, setPendingVoteChoice] = useState<PendingVoteChoice | null>(null);
@@ -1313,6 +1332,7 @@ function App() {
       imageUrl: newSecretImage ?? undefined,
       createdAt,
       ratings: [],
+      gossips: [],
     };
     const nextSecrets = [secret, ...secrets];
 
@@ -1481,6 +1501,34 @@ function App() {
       }
       return s;
     }));
+  };
+
+  const handleGossipImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setGossipImage(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const submitGossip = (secretId: number) => {
+    if (!currentUser) return;
+    const trimmed = gossipText.trim();
+    if (!trimmed && !gossipImage) return;
+    const newGossip: SecretGossip = {
+      id: Date.now(),
+      user: currentUser.name,
+      text: trimmed,
+      imageUrl: gossipImage ?? undefined,
+      createdAt: Date.now(),
+    };
+    setSecrets(prev => prev.map(s =>
+      s.id === secretId ? { ...s, gossips: [...s.gossips, newGossip] } : s
+    ));
+    setGossipText('');
+    setGossipImage(null);
   };
 
   const buyShare = async (marketId: number, outcome: 'yes' | 'no', voteAmount: number) => {
@@ -2692,6 +2740,93 @@ function App() {
           )}
           {activeTab === 'secret' && (
             <>
+              {secretDetailId && (() => {
+                const detailSecret = secrets.find(s => s.id === secretDetailId);
+                if (!detailSecret) return null;
+                const myRatingD = detailSecret.ratings.find(r => r.user === currentUser?.name);
+                return (
+                  <div className="secret-detail-panel">
+                    <div className="secret-detail-header">
+                      <button className="market-back-btn" onClick={() => { setSecretDetailId(null); setGossipText(''); setGossipImage(null); }}>返回秘密列表</button>
+                    </div>
+                    <h2 className="secret-detail-title">{detailSecret.title}</h2>
+                    <p className="secret-detail-meta">By: {detailSecret.author} | {formatSecretTime(detailSecret.createdAt)}</p>
+                    <div className="secret-detail-body">
+                      <p>{detailSecret.content}</p>
+                      {detailSecret.imageUrl && <img className="secret-image" src={detailSecret.imageUrl} alt={detailSecret.title} />}
+                    </div>
+                    <div className="ratings ratings-facebook">
+                      <div className="ratings-caption">看完这条秘密后，你的评价是</div>
+                      <div className="ratings-actions">
+                        <div className="ratings-group">
+                          <button
+                            className={`positive${myRatingD?.authenticity === '真实' ? ' selected' : ''}`}
+                            onClick={() => rateSecret(detailSecret.id, '真实', myRatingD?.value || '值得')}
+                          >真实</button>
+                          <button
+                            className={`negative${myRatingD?.authenticity === '不真实' ? ' selected' : ''}`}
+                            onClick={() => rateSecret(detailSecret.id, '不真实', myRatingD?.value || '不值得')}
+                          >不真实</button>
+                        </div>
+                        <div className="ratings-group">
+                          <button
+                            className={`positive${myRatingD?.value === '值得' ? ' selected' : ''}`}
+                            onClick={() => rateSecret(detailSecret.id, myRatingD?.authenticity || '真实', '值得')}
+                          >值得</button>
+                          <button
+                            className={`negative${myRatingD?.value === '不值得' ? ' selected' : ''}`}
+                            onClick={() => rateSecret(detailSecret.id, myRatingD?.authenticity || '不真实', '不值得')}
+                          >不值得</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="gossip-section">
+                      <h3 className="gossip-section-title">我也有些瓜</h3>
+                      {detailSecret.gossips.length === 0 ? (
+                        <p className="gossip-empty">还没有人上瓜，来分享你知道的吧！</p>
+                      ) : (
+                        <div className="gossip-list">
+                          {detailSecret.gossips.map(g => (
+                            <div key={g.id} className="gossip-item">
+                              <div className="gossip-item-header">
+                                <strong className="gossip-user">{g.user}</strong>
+                                <span className="gossip-time">{formatSecretTime(g.createdAt)}</span>
+                              </div>
+                              {g.text && <p className="gossip-text">{g.text}</p>}
+                              {g.imageUrl && <img className="gossip-image" src={g.imageUrl} alt="gossip" />}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="gossip-composer">
+                        <textarea
+                          className="gossip-textarea"
+                          placeholder="分享你知道的内幕小道消息…"
+                          value={gossipText}
+                          onChange={(e) => setGossipText(e.target.value)}
+                          rows={3}
+                        />
+                        <label className="gossip-image-upload">
+                          {gossipImage ? '替换图片' : '添加图片'}
+                          <input type="file" accept="image/*" onChange={handleGossipImageChange} />
+                        </label>
+                        {gossipImage && (
+                          <div className="gossip-preview-wrap">
+                            <img className="gossip-preview" src={gossipImage} alt="preview" />
+                            <button className="gossip-remove-img" onClick={() => setGossipImage(null)}>×</button>
+                          </div>
+                        )}
+                        <button
+                          className="gossip-submit-btn"
+                          disabled={!gossipText.trim() && !gossipImage}
+                          onClick={() => submitGossip(detailSecret.id)}
+                        >发布瓜料</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              {!secretDetailId && <>
               <div className="publish secret-publish">
                 <h2>Share a Secret</h2>
                 <p className="hint">发布会消耗 20 Crypo points，其他用户查看会支付积分给发布者。</p>
@@ -2828,6 +2963,12 @@ function App() {
                             </div>
                           </div>
                         </div>
+                        <button
+                          className="secret-detail-link"
+                          onClick={() => setSecretDetailId(secret.id)}
+                        >
+                          查看详情 &amp; 我也有些瓜
+                        </button>
                       </>
                     ) : (
                       <button onClick={() => requestViewSecret(secret)}>
@@ -2840,8 +2981,9 @@ function App() {
               {filteredSecrets.length === 0 && (
                 <div className="secret-empty">当前筛选条件下还没有秘密。</div>
               )}
-            </>
-          )}
+            </>}
+          </>
+        )}
         </>
       )}
     </div>

@@ -804,6 +804,161 @@ button:disabled {
   padding: 8px 10px;
 }
 
+.secret-detail-link {
+  margin-top: 10px;
+  background: #78684f;
+}
+
+.secret-detail-link:hover {
+  background: #5f533f;
+}
+
+.secret-detail-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #e2d7bf;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fffaf0 0%, #fff8eb 100%);
+}
+
+.secret-detail-header {
+  margin-bottom: 10px;
+}
+
+.secret-detail-title {
+  margin: 0 0 6px;
+}
+
+.secret-detail-meta {
+  margin: 0 0 10px;
+  color: #746857;
+  font-size: 13px;
+}
+
+.secret-detail-body {
+  margin-bottom: 12px;
+}
+
+.gossip-section {
+  margin-top: 12px;
+  border-top: 1px dashed #dbcdb4;
+  padding-top: 12px;
+}
+
+.gossip-section-title {
+  margin: 0 0 10px;
+}
+
+.gossip-empty {
+  margin: 0 0 10px;
+  color: #8f7f6a;
+  font-size: 13px;
+}
+
+.gossip-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gossip-item {
+  border: 1px solid #e1d5bf;
+  border-radius: 12px;
+  background: #fffdf6;
+  padding: 10px;
+}
+
+.gossip-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.gossip-user {
+  color: #4f4338;
+}
+
+.gossip-time {
+  color: #8f7f6a;
+  font-size: 12px;
+}
+
+.gossip-text {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  color: #5f5547;
+}
+
+.gossip-image {
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e4d8c2;
+}
+
+.gossip-composer {
+  display: grid;
+  gap: 8px;
+}
+
+.gossip-textarea {
+  border-radius: 12px;
+  border: 1px solid #d9ceb8;
+  background: #fffdf7;
+  padding: 10px;
+  resize: vertical;
+}
+
+.gossip-image-upload {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border: 1px dashed #cbbba2;
+  border-radius: 10px;
+  color: #6f6456;
+  cursor: pointer;
+}
+
+.gossip-image-upload input {
+  display: none;
+}
+
+.gossip-preview-wrap {
+  width: fit-content;
+  position: relative;
+}
+
+.gossip-preview {
+  width: 140px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #dfd3be;
+}
+
+.gossip-remove-img {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: none;
+  background: #a54135;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.gossip-submit-btn {
+  width: fit-content;
+}
+
 .market-toolbar {
   display: grid;
   grid-template-columns: minmax(240px, 1.4fr) minmax(360px, 2fr) auto;
