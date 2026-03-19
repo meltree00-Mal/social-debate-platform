@@ -159,6 +159,14 @@ const SECRET_PUBLISH_FEE = 20;
 const VOTE_AMOUNT_OPTIONS = [1, 10, 100] as const;
 const HOME_LOGO_URL = '/social-duixian-logo.png?v=20260317-1';
 const NEW_CONTENT_DURATION_MS = 24 * 60 * 60 * 1000;
+const ENABLE_SERVER_WRITES = import.meta.env.VITE_ENABLE_SERVER_WRITES === 'true';
+
+interface ServerMutateResult {
+  ok: boolean;
+  code: 'OK' | 'VERSION_CONFLICT' | 'INVALID_REQUEST' | 'INVALID_DOC' | 'UNAVAILABLE' | 'SERVER_ERROR' | 'DUPLICATE';
+  version: number;
+  updatedAt: string;
+}
 
 const SHARED_TABLES: Record<SharedCollectionKey, string> = {
   users: 'shared_users',
@@ -758,6 +766,123 @@ function App() {
     return true;
   };
 
+  const buildRequestId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
+  const mutateSharedDocumentViaServer = async <TPayload,>(
+    key: SharedCollectionKey,
+    payload: TPayload,
+    mutationType: string,
+  ): Promise<PersistDocStatus> => {
+    const expectedVersion = remoteVersionsRef.current[key] ?? 0;
+    const requestId = buildRequestId();
+
+    let response: Response;
+    try {
+      response = await fetch('/api/state/mutate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          doc: key,
+          expectedVersion,
+          requestId,
+          mutationType,
+          payload,
+          userName: currentUserRef.current?.name ?? null,
+        }),
+      });
+    } catch {
+      return 'error';
+    }
+
+    let result: Partial<ServerMutateResult> = {};
+    try {
+      result = await response.json();
+    } catch {
+      result = {};
+    }
+
+    if (response.status === 409 || result.code === 'VERSION_CONFLICT') {
+      return 'conflict';
+    }
+
+    if (!response.ok || result.ok !== true || typeof result.version !== 'number') {
+      return 'error';
+    }
+
+    remoteVersionsRef.current[key] = result.version;
+    return 'ok';
+  };
+
+  const persistServerManagedCriticalState = async (
+    overrides: Partial<SharedAppState>,
+    mutationType: string,
+    hasRetried = false,
+  ): Promise<boolean> => {
+    if (!ENABLE_SERVER_WRITES) {
+      return persistSharedState(overrides);
+    }
+
+    if (!isSupabaseEnabled || !supabase) {
+      return true;
+    }
+
+    const nextSnapshot = buildSharedStatePayload(overrides);
+    const existingTotalCount = users.length + markets.length + secrets.length + feedbacks.length;
+    const nextTotalCount = nextSnapshot.users.length
+      + nextSnapshot.markets.length
+      + nextSnapshot.secrets.length
+      + nextSnapshot.feedbacks.length;
+
+    if (existingTotalCount > 0 && nextTotalCount === 0) {
+      return false;
+    }
+
+    const docsToPersist: Array<{ key: SharedCollectionKey; payload: unknown }> = [];
+
+    if (Object.prototype.hasOwnProperty.call(overrides, 'users')) {
+      docsToPersist.push({ key: 'users', payload: nextSnapshot.users });
+    }
+    if (Object.prototype.hasOwnProperty.call(overrides, 'markets')) {
+      docsToPersist.push({ key: 'markets', payload: nextSnapshot.markets });
+    }
+
+    if (docsToPersist.length === 0) {
+      return persistSharedState(overrides);
+    }
+
+    remoteSavingRef.current = true;
+    lastLocalMutationAtRef.current = Date.now();
+
+    for (const doc of docsToPersist) {
+      const result = await mutateSharedDocumentViaServer(doc.key, doc.payload, mutationType);
+      if (result === 'conflict') {
+        remoteSavingRef.current = false;
+        lastPersistConflictAtRef.current = Date.now();
+        await pullSharedState(true);
+        if (!hasRetried) {
+          return persistServerManagedCriticalState(overrides, mutationType, true);
+        }
+        return false;
+      }
+
+      if (result === 'error') {
+        remoteSavingRef.current = false;
+        return false;
+      }
+    }
+
+    remoteSavingRef.current = false;
+    await pullSharedState(false);
+    return true;
+  };
+
   const applyCreditDelta = (
     userList: User[],
     userName: string,
@@ -1230,7 +1355,10 @@ function App() {
     setNewDeadline('');
 
     try {
-      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      const didPersist = await persistServerManagedCriticalState(
+        { users: nextUsers, markets: nextMarkets },
+        'publish_market',
+      );
       if (!didPersist) {
         alert(getSyncFailureMessage('预测已发布到当前页面，但同步到主页失败，请稍后刷新确认。'));
       }
@@ -1719,7 +1847,10 @@ function App() {
     setMarkets(nextMarkets);
 
     try {
-      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      const didPersist = await persistServerManagedCriticalState(
+        { users: nextUsers, markets: nextMarkets },
+        'buy_share',
+      );
       if (!didPersist) {
         alert(getSyncFailureMessage('投票已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
       }
@@ -1829,7 +1960,10 @@ function App() {
     setMarkets(nextMarkets);
 
     try {
-      const didPersist = await persistSharedState({ users: nextUsers, markets: nextMarkets });
+      const didPersist = await persistServerManagedCriticalState(
+        { users: nextUsers, markets: nextMarkets },
+        'revoke_vote',
+      );
       if (!didPersist) {
         alert(getSyncFailureMessage('撤销选择已在当前页面生效，但主页同步失败，请稍后刷新确认。'));
       }

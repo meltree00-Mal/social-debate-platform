@@ -57,6 +57,14 @@
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
+为减少并发覆盖并提升更新及时性，建议启用服务端写入开关：
+
+- `VITE_ENABLE_SERVER_WRITES=true`（前端灰度开关）
+- `SUPABASE_SERVICE_ROLE_KEY`（仅服务端函数使用）
+
+当前已提供 Vercel API：`POST /api/state/mutate`。
+建议先在 Preview 验证后再在 Production 打开 `VITE_ENABLE_SERVER_WRITES`。
+
 ## 当前版本的重要限制
 
 当前版本的数据存储基于浏览器 `localStorage`，这意味着：
