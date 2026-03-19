@@ -184,8 +184,6 @@ function App() {
   const lastPersistConflictAtRef = useRef(0);
   const currentUserRef = useRef<User | null>(null);
   const [hasCompletedInitialRemoteSync, setHasCompletedInitialRemoteSync] = useState(!isSupabaseEnabled);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [authDisplayName, setAuthDisplayName] = useState<string | null>(null);
 
   const normalizeMarket = (market: Partial<Market>): Market => {
     const normalizedVoteRecords: Market['voteRecords'] = Array.isArray(market.voteRecords)
@@ -329,42 +327,6 @@ function App() {
     };
   };
 
-  const createUserForAuth = (userList: User[], email: string, preferredName?: string) => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const existing = userList.find(user => user.email.trim().toLowerCase() === normalizedEmail);
-    if (existing) {
-      return { nextUsers: userList, user: existing };
-    }
-
-    const nameSeed = (preferredName?.trim() || normalizedEmail.split('@')[0] || `user-${Date.now()}`).replace(/\s+/g, '-');
-    let candidateName = nameSeed;
-    let suffix = 1;
-    const takenNames = new Set(userList.map(user => user.name.trim().toLowerCase()));
-
-    while (takenNames.has(candidateName.trim().toLowerCase())) {
-      candidateName = `${nameSeed}-${suffix}`;
-      suffix += 1;
-    }
-
-    const createdUser: User = {
-      id: Date.now(),
-      name: candidateName,
-      email: normalizedEmail,
-      password: '',
-      isAdmin: candidateName.trim().toLowerCase() === 'admin',
-      isActive: true,
-      credit: legacyBalance,
-      creditHistory: [{
-        id: Date.now() + Math.floor(Math.random() * 1000),
-        delta: legacyBalance,
-        reason: 'Initial credit',
-        balanceAfter: legacyBalance,
-        createdAt: Date.now(),
-      }],
-    };
-
-    return { nextUsers: [...userList, createdUser], user: createdUser };
-  };
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('users');
     if (!saved) return [];
@@ -858,81 +820,6 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!isSupabaseEnabled || !supabase) return;
-
-    let active = true;
-
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      const email = data.session?.user?.email?.trim().toLowerCase() ?? null;
-      const displayName = typeof data.session?.user?.user_metadata?.display_name === 'string'
-        ? data.session.user.user_metadata.display_name
-        : null;
-      setAuthEmail(email);
-      setAuthDisplayName(displayName);
-    });
-
-    const { data: subscriptionData } = supabase.auth.onAuthStateChange((_event, session) => {
-      const email = session?.user?.email?.trim().toLowerCase() ?? null;
-      const displayName = typeof session?.user?.user_metadata?.display_name === 'string'
-        ? session.user.user_metadata.display_name
-        : null;
-      setAuthEmail(email);
-      setAuthDisplayName(displayName);
-    });
-
-    return () => {
-      active = false;
-      subscriptionData.subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isSupabaseEnabled || !supabase) return;
-
-    if (!authEmail) {
-      if (currentUser) {
-        setCurrentUser(null);
-      }
-      localStorage.removeItem('currentUserName');
-      return;
-    }
-
-    const normalizedEmail = authEmail.trim().toLowerCase();
-    const matchedUser = users.find(user => user.email.trim().toLowerCase() === normalizedEmail);
-
-    if (!matchedUser) {
-      if (!hasCompletedInitialRemoteSync) {
-        return;
-      }
-
-      const created = createUserForAuth(users, normalizedEmail, authDisplayName ?? undefined);
-      setUsers(created.nextUsers);
-      setCurrentUser(created.user);
-      return;
-    }
-
-    if (!matchedUser.isActive) {
-      setCurrentUser(null);
-      localStorage.removeItem('currentUserName');
-      void supabase.auth.signOut();
-      alert('This account has been deactivated by admin.');
-      return;
-    }
-
-    if (
-      !currentUser
-      || currentUser.id !== matchedUser.id
-      || currentUser.name !== matchedUser.name
-      || currentUser.credit !== matchedUser.credit
-      || currentUser.isAdmin !== matchedUser.isAdmin
-      || currentUser.email !== matchedUser.email
-    ) {
-      setCurrentUser(matchedUser);
-    }
-  }, [authEmail, authDisplayName, users, hasCompletedInitialRemoteSync, currentUser]);
-
-  useEffect(() => {
     localStorage.setItem('users', JSON.stringify(users));
   }, [users]);
 
@@ -1034,40 +921,12 @@ function App() {
     }
   }, [users, currentUser]);
 
-  const login = async () => {
+  const login = () => {
     const normalizedName = loginName.trim().toLowerCase();
     const normalizedPassword = loginPassword.trim();
 
     if (!normalizedName || !normalizedPassword) {
       alert('Please enter username and password');
-      return;
-    }
-
-    if (isSupabaseEnabled && supabase) {
-      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailPattern.test(normalizedName)) {
-        alert('请输入有效邮箱地址进行登录。');
-        return;
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedName,
-        password: normalizedPassword,
-      });
-
-      if (error) {
-        alert(error.message || '登录失败，请检查邮箱和密码。');
-        return;
-      }
-
-      const sessionEmail = data.user?.email?.trim().toLowerCase() ?? normalizedName;
-      const displayName = typeof data.user?.user_metadata?.display_name === 'string'
-        ? data.user.user_metadata.display_name
-        : null;
-      setAuthEmail(sessionEmail);
-      setAuthDisplayName(displayName);
-      setLoginName('');
-      setLoginPassword('');
       return;
     }
 
@@ -1110,7 +969,7 @@ function App() {
     }
   };
 
-  const register = async () => {
+  const register = () => {
     const normalizedName = registerName.trim();
     const normalizedEmail = registerEmail.trim().toLowerCase();
     const normalizedPassword = registerPassword.trim();
@@ -1121,36 +980,6 @@ function App() {
 
     if (!emailPattern.test(normalizedEmail)) {
       alert('Please enter a valid email address');
-      return;
-    }
-
-    if (isSupabaseEnabled && supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password: normalizedPassword,
-        options: {
-          data: {
-            display_name: normalizedName,
-          },
-        },
-      });
-
-      if (error) {
-        alert(error.message || '注册失败，请稍后重试。');
-        return;
-      }
-
-      if (!data.session) {
-        setIsLogin(true);
-        alert('注册成功，请先完成邮箱验证后再登录。');
-        return;
-      }
-
-      setAuthEmail(normalizedEmail);
-      setAuthDisplayName(normalizedName || null);
-      setRegisterName('');
-      setRegisterEmail('');
-      setRegisterPassword('');
       return;
     }
 
@@ -1182,22 +1011,17 @@ function App() {
     }
   };
 
-  const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLoginSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await login();
+    login();
   };
 
-  const handleRegisterSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleRegisterSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await register();
+    register();
   };
 
-  const logout = async () => {
-    if (isSupabaseEnabled && supabase) {
-      await supabase.auth.signOut();
-      setAuthEmail(null);
-      setAuthDisplayName(null);
-    }
+  const logout = () => {
     setCurrentUser(null);
     setActiveTab('truth');
   };
@@ -1243,7 +1067,7 @@ function App() {
     }
   };
 
-  const resetUserPassword = async (targetUser: User) => {
+  const resetUserPassword = (targetUser: User) => {
     if (!currentUser?.isAdmin) return;
     const nextPassword = (passwordDrafts[targetUser.id] || '').trim();
     if (!nextPassword) {
@@ -1256,48 +1080,6 @@ function App() {
       return;
     }
 
-    if (isSupabaseEnabled && supabase) {
-      const targetEmail = targetUser.email.trim().toLowerCase();
-      if (!targetEmail) {
-        alert('该用户没有邮箱，无法使用 Supabase 重置密码。');
-        return;
-      }
-
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData.session?.access_token) {
-        alert('登录状态已失效，请重新登录管理员账号后重试。');
-        return;
-      }
-
-      const response = await fetch('/api/admin-reset-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          accessToken: sessionData.session.access_token,
-          targetEmail,
-          newPassword: nextPassword,
-        }),
-      });
-
-      let responsePayload: { error?: string } = {};
-      try {
-        responsePayload = await response.json();
-      } catch {
-        responsePayload = {};
-      }
-
-      if (!response.ok) {
-        alert(responsePayload.error || '管理员重置密码失败，请稍后重试。');
-        return;
-      }
-
-      setPasswordDrafts(prev => ({ ...prev, [targetUser.id]: '' }));
-      alert('密码已通过 Supabase 重置成功。');
-      return;
-    }
-
     setUsers(prev => prev.map(user => user.id === targetUser.id ? { ...user, password: nextPassword } : user));
 
     if (currentUser.id === targetUser.id) {
@@ -1307,7 +1089,7 @@ function App() {
     setPasswordDrafts(prev => ({ ...prev, [targetUser.id]: '' }));
   };
 
-  const changeOwnPassword = async () => {
+  const changeOwnPassword = () => {
     if (!currentUser) return;
 
     const oldPassword = currentPasswordInput.trim();
@@ -1331,39 +1113,6 @@ function App() {
 
     if (nextPassword !== confirmPassword) {
       alert('两次输入的新密码不一致。');
-      return;
-    }
-
-    if (isSupabaseEnabled && supabase) {
-      const userEmail = currentUser.email.trim().toLowerCase();
-      if (!userEmail) {
-        alert('当前账号缺少邮箱信息，无法完成密码修改。');
-        return;
-      }
-
-      const { error: reAuthError } = await supabase.auth.signInWithPassword({
-        email: userEmail,
-        password: oldPassword,
-      });
-
-      if (reAuthError) {
-        alert('当前密码不正确。');
-        return;
-      }
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: nextPassword,
-      });
-
-      if (updateError) {
-        alert(updateError.message || '密码修改失败，请稍后重试。');
-        return;
-      }
-
-      setCurrentPasswordInput('');
-      setNewPasswordInput('');
-      setConfirmNewPasswordInput('');
-      alert('密码修改成功。');
       return;
     }
 
@@ -2647,14 +2396,11 @@ function App() {
       {!currentUser ? (
         <div className="auth">
           <h2>{isLogin ? 'Login' : 'Register'}</h2>
-          {isSupabaseEnabled && (
-            <p className="hint">已启用 Supabase Auth，请使用邮箱和密码登录。</p>
-          )}
           {isLogin ? (
             <form className="auth-form" onSubmit={handleLoginSubmit}>
               <input
-                type={isSupabaseEnabled ? 'email' : 'text'}
-                placeholder={isSupabaseEnabled ? 'Email' : 'Username'}
+                type="text"
+                placeholder="Username"
                 value={loginName}
                 onChange={(e) => setLoginName(e.target.value)}
               />

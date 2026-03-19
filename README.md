@@ -57,15 +57,6 @@
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-如需启用“管理员重置用户密码”（通过 Vercel API），还需要在 Vercel Project 的 Environment Variables 中配置：
-
-- `SUPABASE_SERVICE_ROLE_KEY`（仅服务端使用，绝不能放到前端 `VITE_` 变量）
-
-说明：
-
-- 登录/注册/登出、用户自行修改密码：前端直接走 Supabase Auth。
-- 管理员重置他人密码：调用 `/api/admin-reset-password`，由服务端使用 `SUPABASE_SERVICE_ROLE_KEY` 执行。
-
 ## 当前版本的重要限制
 
 当前版本的数据存储基于浏览器 `localStorage`，这意味着：
