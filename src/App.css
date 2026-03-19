@@ -389,6 +389,14 @@ h1 {
   border: 1px solid #deceb0;
   background: linear-gradient(165deg, #fff9ef 0%, #ffefd8 55%, #fbe5c7 100%);
   box-shadow: 0 6px 20px rgba(86, 56, 15, 0.1);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.guest-preview:hover,
+.guest-preview:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(86, 56, 15, 0.16);
 }
 
 .guest-preview-head h3 {
@@ -406,9 +414,7 @@ h1 {
 
 .guest-preview-grid {
   margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  display: block;
 }
 
 .guest-preview-panel {
@@ -427,16 +433,14 @@ h1 {
   letter-spacing: 0.08em;
 }
 
-.preview-market-card,
-.preview-secret-card {
+.preview-market-card {
   border: 1px solid #e8dcc6;
   border-radius: 12px;
   padding: 10px;
   background: #fffdf7;
 }
 
-.preview-market-card h4,
-.preview-secret-card h4 {
+.preview-market-card h4 {
   margin: 0;
   color: #312612;
   font-size: 14px;
@@ -483,50 +487,15 @@ h1 {
   padding: 6px;
 }
 
-.preview-secret-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.preview-lock {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  color: #6b4b0f;
-  border: 1px dashed #c79d53;
-  border-radius: 999px;
-  padding: 3px 7px;
-  background: #fff4de;
-  white-space: nowrap;
-}
-
-.preview-blur-text {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: #8f8068;
-  filter: blur(2px);
-  user-select: none;
-}
-
-.guest-preview-cta {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.guest-outline-btn {
-  background: #fffdf7;
-  color: #5b4b33;
-  border: 1px solid #d9c4a0;
-  text-shadow: none;
-}
-
-.guest-outline-btn:hover {
-  background: #f7ebd4;
-  color: #4a3c28;
+.auth-privacy-note {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed #d6c7ad;
+  background: #fff8ea;
+  color: #6a5a42;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .auth input,
@@ -2295,16 +2264,6 @@ button:disabled {
   .confirm-actions button,
   .credit-filter-row select {
     width: 100%;
-  }
-
-  .guest-preview-grid,
-  .guest-preview-cta {
-    grid-template-columns: 1fr;
-  }
-
-  .preview-secret-header {
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .credit-history-item {

@@ -2077,16 +2077,10 @@ function App() {
     });
 
   const guestPreviewMarkets = filteredMarkets.slice(0, 3);
-  const guestPreviewSecrets = filteredSecrets.slice(0, 3);
   const fallbackPreviewMarkets = [
     { question: '下周是否会出现全网热议的新AI产品？', tag: '经济', yesPrice: 0.63, noPrice: 0.37, participants: 42, deadline: '2026-03-27' },
     { question: '本月末本地会不会迎来明显降温？', tag: '生活', yesPrice: 0.46, noPrice: 0.54, participants: 29, deadline: '2026-03-31' },
     { question: '下一次重要发布会会不会带来黑马政策？', tag: '政治', yesPrice: 0.58, noPrice: 0.42, participants: 35, deadline: '2026-04-05' },
-  ];
-  const fallbackPreviewSecrets = [
-    { title: '某圈内合作消息正在酝酿', author: 'Insider-17', price: 16, gossips: 12 },
-    { title: '一条影响投票风向的内部细节', author: 'Watcher-A', price: 9, gossips: 7 },
-    { title: '明日开盘前的关键词预警', author: 'EchoTeam', price: 23, gossips: 19 },
   ];
 
   const resetMarketFilters = () => {
@@ -2286,10 +2280,22 @@ function App() {
   };
 
   const renderGuestPreview = () => (
-    <section className="guest-preview" aria-label="平台预览">
+    <section
+      className="guest-preview"
+      aria-label="平台预览"
+      role="button"
+      tabIndex={0}
+      onClick={() => setIsLogin(false)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          setIsLogin(false);
+        }
+      }}
+    >
       <div className="guest-preview-head">
         <h3>先看看大家都在玩什么</h3>
-        <p>登录后可参与投票、查看秘密详情、发布你的观点并实时同步到主页。</p>
+        <p>点击此区域即可进入注册流程。注册后可参与投票并发布你的观点。</p>
       </div>
 
       <div className="guest-preview-grid">
@@ -2329,48 +2335,6 @@ function App() {
             );
           })}
         </div>
-
-        <div className="guest-preview-panel">
-          <div className="guest-preview-panel-title">秘密预览</div>
-          {(guestPreviewSecrets.length > 0 ? guestPreviewSecrets : fallbackPreviewSecrets).map((item, index) => {
-            if ('id' in item) {
-              return (
-                <article key={item.id} className="preview-secret-card">
-                  <div className="preview-secret-header">
-                    <h4>{item.title}</h4>
-                    <span className="preview-lock">登录后解锁</span>
-                  </div>
-                  <p className="preview-blur-text">{item.content.slice(0, 40) || '这里有一条高价值内容，登录后查看完整信息。'}...</p>
-                  <div className="preview-meta-row">
-                    <span>发布者 {item.author}</span>
-                    <span>{item.gossips.length} 条瓜料</span>
-                    <span>{item.price} Crypo</span>
-                  </div>
-                </article>
-              );
-            }
-
-            return (
-              <article key={`fallback-secret-${index}`} className="preview-secret-card">
-                <div className="preview-secret-header">
-                  <h4>{item.title}</h4>
-                  <span className="preview-lock">登录后解锁</span>
-                </div>
-                <p className="preview-blur-text">这里有一条高价值内容，登录后查看完整信息...</p>
-                <div className="preview-meta-row">
-                  <span>发布者 {item.author}</span>
-                  <span>{item.gossips} 条瓜料</span>
-                  <span>{item.price} Crypo</span>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="guest-preview-cta">
-        <button className="auth-primary-btn" type="button" onClick={() => setIsLogin(true)}>立即登录参与</button>
-        <button className="guest-outline-btn" type="button" onClick={() => setIsLogin(false)}>创建账号开始体验</button>
       </div>
     </section>
   );
@@ -2416,6 +2380,7 @@ function App() {
             </form>
           ) : (
             <form className="auth-form" onSubmit={handleRegisterSubmit}>
+              <p className="auth-privacy-note">本工具仍在测试阶段，不会采集你的个人隐私信息。</p>
               <input
                 type="text"
                 placeholder="Username"
