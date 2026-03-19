@@ -184,6 +184,8 @@ function App() {
   const lastPersistConflictAtRef = useRef(0);
   const currentUserRef = useRef<User | null>(null);
   const [hasCompletedInitialRemoteSync, setHasCompletedInitialRemoteSync] = useState(!isSupabaseEnabled);
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [authDisplayName, setAuthDisplayName] = useState<string | null>(null);
 
   const normalizeMarket = (market: Partial<Market>): Market => {
     const normalizedVoteRecords: Market['voteRecords'] = Array.isArray(market.voteRecords)
@@ -325,6 +327,43 @@ function App() {
       credit: normalizedCredit,
       creditHistory: history,
     };
+  };
+
+  const createUserForAuth = (userList: User[], email: string, preferredName?: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = userList.find(user => user.email.trim().toLowerCase() === normalizedEmail);
+    if (existing) {
+      return { nextUsers: userList, user: existing };
+    }
+
+    const nameSeed = (preferredName?.trim() || normalizedEmail.split('@')[0] || `user-${Date.now()}`).replace(/\s+/g, '-');
+    let candidateName = nameSeed;
+    let suffix = 1;
+    const takenNames = new Set(userList.map(user => user.name.trim().toLowerCase()));
+
+    while (takenNames.has(candidateName.trim().toLowerCase())) {
+      candidateName = `${nameSeed}-${suffix}`;
+      suffix += 1;
+    }
+
+    const createdUser: User = {
+      id: Date.now(),
+      name: candidateName,
+      email: normalizedEmail,
+      password: '',
+      isAdmin: candidateName.trim().toLowerCase() === 'admin',
+      isActive: true,
+      credit: legacyBalance,
+      creditHistory: [{
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        delta: legacyBalance,
+        reason: 'Initial credit',
+        balanceAfter: legacyBalance,
+        createdAt: Date.now(),
+      }],
+    };
+
+    return { nextUsers: [...userList, createdUser], user: createdUser };
   };
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('users');
@@ -509,8 +548,9 @@ function App() {
       );
 
       if (!stillExists) {
-        setHasCompletedInitialRemoteSync(true);
-        return false;
+        // Keep remote as source of truth: logout stale local session instead of blocking pull.
+        setCurrentUser(null);
+        localStorage.removeItem('currentUserName');
       }
     }
 
@@ -818,6 +858,81 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    if (!isSupabaseEnabled || !supabase) return;
+
+    let active = true;
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const email = data.session?.user?.email?.trim().toLowerCase() ?? null;
+      const displayName = typeof data.session?.user?.user_metadata?.display_name === 'string'
+        ? data.session.user.user_metadata.display_name
+        : null;
+      setAuthEmail(email);
+      setAuthDisplayName(displayName);
+    });
+
+    const { data: subscriptionData } = supabase.auth.onAuthStateChange((_event, session) => {
+      const email = session?.user?.email?.trim().toLowerCase() ?? null;
+      const displayName = typeof session?.user?.user_metadata?.display_name === 'string'
+        ? session.user.user_metadata.display_name
+        : null;
+      setAuthEmail(email);
+      setAuthDisplayName(displayName);
+    });
+
+    return () => {
+      active = false;
+      subscriptionData.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !supabase) return;
+
+    if (!authEmail) {
+      if (currentUser) {
+        setCurrentUser(null);
+      }
+      localStorage.removeItem('currentUserName');
+      return;
+    }
+
+    const normalizedEmail = authEmail.trim().toLowerCase();
+    const matchedUser = users.find(user => user.email.trim().toLowerCase() === normalizedEmail);
+
+    if (!matchedUser) {
+      if (!hasCompletedInitialRemoteSync) {
+        return;
+      }
+
+      const created = createUserForAuth(users, normalizedEmail, authDisplayName ?? undefined);
+      setUsers(created.nextUsers);
+      setCurrentUser(created.user);
+      return;
+    }
+
+    if (!matchedUser.isActive) {
+      setCurrentUser(null);
+      localStorage.removeItem('currentUserName');
+      void supabase.auth.signOut();
+      alert('This account has been deactivated by admin.');
+      return;
+    }
+
+    if (
+      !currentUser
+      || currentUser.id !== matchedUser.id
+      || currentUser.name !== matchedUser.name
+      || currentUser.credit !== matchedUser.credit
+      || currentUser.isAdmin !== matchedUser.isAdmin
+      || currentUser.email !== matchedUser.email
+    ) {
+      setCurrentUser(matchedUser);
+    }
+  }, [authEmail, authDisplayName, users, hasCompletedInitialRemoteSync, currentUser]);
+
+  useEffect(() => {
     localStorage.setItem('users', JSON.stringify(users));
   }, [users]);
 
@@ -919,12 +1034,40 @@ function App() {
     }
   }, [users, currentUser]);
 
-  const login = () => {
+  const login = async () => {
     const normalizedName = loginName.trim().toLowerCase();
     const normalizedPassword = loginPassword.trim();
 
     if (!normalizedName || !normalizedPassword) {
       alert('Please enter username and password');
+      return;
+    }
+
+    if (isSupabaseEnabled && supabase) {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailPattern.test(normalizedName)) {
+        alert('请输入有效邮箱地址进行登录。');
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedName,
+        password: normalizedPassword,
+      });
+
+      if (error) {
+        alert(error.message || '登录失败，请检查邮箱和密码。');
+        return;
+      }
+
+      const sessionEmail = data.user?.email?.trim().toLowerCase() ?? normalizedName;
+      const displayName = typeof data.user?.user_metadata?.display_name === 'string'
+        ? data.user.user_metadata.display_name
+        : null;
+      setAuthEmail(sessionEmail);
+      setAuthDisplayName(displayName);
+      setLoginName('');
+      setLoginPassword('');
       return;
     }
 
@@ -967,7 +1110,7 @@ function App() {
     }
   };
 
-  const register = () => {
+  const register = async () => {
     const normalizedName = registerName.trim();
     const normalizedEmail = registerEmail.trim().toLowerCase();
     const normalizedPassword = registerPassword.trim();
@@ -978,6 +1121,36 @@ function App() {
 
     if (!emailPattern.test(normalizedEmail)) {
       alert('Please enter a valid email address');
+      return;
+    }
+
+    if (isSupabaseEnabled && supabase) {
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: normalizedPassword,
+        options: {
+          data: {
+            display_name: normalizedName,
+          },
+        },
+      });
+
+      if (error) {
+        alert(error.message || '注册失败，请稍后重试。');
+        return;
+      }
+
+      if (!data.session) {
+        setIsLogin(true);
+        alert('注册成功，请先完成邮箱验证后再登录。');
+        return;
+      }
+
+      setAuthEmail(normalizedEmail);
+      setAuthDisplayName(normalizedName || null);
+      setRegisterName('');
+      setRegisterEmail('');
+      setRegisterPassword('');
       return;
     }
 
@@ -1009,17 +1182,22 @@ function App() {
     }
   };
 
-  const handleLoginSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    login();
+    await login();
   };
 
-  const handleRegisterSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleRegisterSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    register();
+    await register();
   };
 
-  const logout = () => {
+  const logout = async () => {
+    if (isSupabaseEnabled && supabase) {
+      await supabase.auth.signOut();
+      setAuthEmail(null);
+      setAuthDisplayName(null);
+    }
     setCurrentUser(null);
     setActiveTab('truth');
   };
@@ -1065,11 +1243,58 @@ function App() {
     }
   };
 
-  const resetUserPassword = (targetUser: User) => {
+  const resetUserPassword = async (targetUser: User) => {
     if (!currentUser?.isAdmin) return;
     const nextPassword = (passwordDrafts[targetUser.id] || '').trim();
     if (!nextPassword) {
       alert('Please input a new password first.');
+      return;
+    }
+
+    if (nextPassword.length < 4) {
+      alert('新密码至少需要 4 位。');
+      return;
+    }
+
+    if (isSupabaseEnabled && supabase) {
+      const targetEmail = targetUser.email.trim().toLowerCase();
+      if (!targetEmail) {
+        alert('该用户没有邮箱，无法使用 Supabase 重置密码。');
+        return;
+      }
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session?.access_token) {
+        alert('登录状态已失效，请重新登录管理员账号后重试。');
+        return;
+      }
+
+      const response = await fetch('/api/admin-reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accessToken: sessionData.session.access_token,
+          targetEmail,
+          newPassword: nextPassword,
+        }),
+      });
+
+      let responsePayload: { error?: string } = {};
+      try {
+        responsePayload = await response.json();
+      } catch {
+        responsePayload = {};
+      }
+
+      if (!response.ok) {
+        alert(responsePayload.error || '管理员重置密码失败，请稍后重试。');
+        return;
+      }
+
+      setPasswordDrafts(prev => ({ ...prev, [targetUser.id]: '' }));
+      alert('密码已通过 Supabase 重置成功。');
       return;
     }
 
@@ -1082,7 +1307,7 @@ function App() {
     setPasswordDrafts(prev => ({ ...prev, [targetUser.id]: '' }));
   };
 
-  const changeOwnPassword = () => {
+  const changeOwnPassword = async () => {
     if (!currentUser) return;
 
     const oldPassword = currentPasswordInput.trim();
@@ -1106,6 +1331,39 @@ function App() {
 
     if (nextPassword !== confirmPassword) {
       alert('两次输入的新密码不一致。');
+      return;
+    }
+
+    if (isSupabaseEnabled && supabase) {
+      const userEmail = currentUser.email.trim().toLowerCase();
+      if (!userEmail) {
+        alert('当前账号缺少邮箱信息，无法完成密码修改。');
+        return;
+      }
+
+      const { error: reAuthError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: oldPassword,
+      });
+
+      if (reAuthError) {
+        alert('当前密码不正确。');
+        return;
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: nextPassword,
+      });
+
+      if (updateError) {
+        alert(updateError.message || '密码修改失败，请稍后重试。');
+        return;
+      }
+
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmNewPasswordInput('');
+      alert('密码修改成功。');
       return;
     }
 
@@ -2069,6 +2327,19 @@ function App() {
       return right.createdAt - left.createdAt;
     });
 
+  const guestPreviewMarkets = filteredMarkets.slice(0, 3);
+  const guestPreviewSecrets = filteredSecrets.slice(0, 3);
+  const fallbackPreviewMarkets = [
+    { question: '下周是否会出现全网热议的新AI产品？', tag: '经济', yesPrice: 0.63, noPrice: 0.37, participants: 42, deadline: '2026-03-27' },
+    { question: '本月末本地会不会迎来明显降温？', tag: '生活', yesPrice: 0.46, noPrice: 0.54, participants: 29, deadline: '2026-03-31' },
+    { question: '下一次重要发布会会不会带来黑马政策？', tag: '政治', yesPrice: 0.58, noPrice: 0.42, participants: 35, deadline: '2026-04-05' },
+  ];
+  const fallbackPreviewSecrets = [
+    { title: '某圈内合作消息正在酝酿', author: 'Insider-17', price: 16, gossips: 12 },
+    { title: '一条影响投票风向的内部细节', author: 'Watcher-A', price: 9, gossips: 7 },
+    { title: '明日开盘前的关键词预警', author: 'EchoTeam', price: 23, gossips: 19 },
+  ];
+
   const resetMarketFilters = () => {
     setMarketKeyword('');
     setMarketTagFilter('all');
@@ -2265,6 +2536,96 @@ function App() {
     );
   };
 
+  const renderGuestPreview = () => (
+    <section className="guest-preview" aria-label="平台预览">
+      <div className="guest-preview-head">
+        <h3>先看看大家都在玩什么</h3>
+        <p>登录后可参与投票、查看秘密详情、发布你的观点并实时同步到主页。</p>
+      </div>
+
+      <div className="guest-preview-grid">
+        <div className="guest-preview-panel">
+          <div className="guest-preview-panel-title">热门预测</div>
+          {(guestPreviewMarkets.length > 0 ? guestPreviewMarkets : fallbackPreviewMarkets).map((item, index) => {
+            if ('id' in item) {
+              return (
+                <article key={item.id} className="preview-market-card">
+                  <h4>{item.question}</h4>
+                  <div className="preview-meta-row">
+                    <span className="preview-tag">{item.tag}</span>
+                    <span>{item.participants.length} 人参与</span>
+                    <span>截止 {item.deadline}</span>
+                  </div>
+                  <div className="preview-odds-row">
+                    <span>会的 {(item.yesPrice * 100).toFixed(1)}%</span>
+                    <span>不会的 {(item.noPrice * 100).toFixed(1)}%</span>
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <article key={`fallback-market-${index}`} className="preview-market-card">
+                <h4>{item.question}</h4>
+                <div className="preview-meta-row">
+                  <span className="preview-tag">{item.tag}</span>
+                  <span>{item.participants} 人参与</span>
+                  <span>截止 {item.deadline}</span>
+                </div>
+                <div className="preview-odds-row">
+                  <span>会的 {(item.yesPrice * 100).toFixed(1)}%</span>
+                  <span>不会的 {(item.noPrice * 100).toFixed(1)}%</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="guest-preview-panel">
+          <div className="guest-preview-panel-title">秘密预览</div>
+          {(guestPreviewSecrets.length > 0 ? guestPreviewSecrets : fallbackPreviewSecrets).map((item, index) => {
+            if ('id' in item) {
+              return (
+                <article key={item.id} className="preview-secret-card">
+                  <div className="preview-secret-header">
+                    <h4>{item.title}</h4>
+                    <span className="preview-lock">登录后解锁</span>
+                  </div>
+                  <p className="preview-blur-text">{item.content.slice(0, 40) || '这里有一条高价值内容，登录后查看完整信息。'}...</p>
+                  <div className="preview-meta-row">
+                    <span>发布者 {item.author}</span>
+                    <span>{item.gossips.length} 条瓜料</span>
+                    <span>{item.price} Crypo</span>
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <article key={`fallback-secret-${index}`} className="preview-secret-card">
+                <div className="preview-secret-header">
+                  <h4>{item.title}</h4>
+                  <span className="preview-lock">登录后解锁</span>
+                </div>
+                <p className="preview-blur-text">这里有一条高价值内容，登录后查看完整信息...</p>
+                <div className="preview-meta-row">
+                  <span>发布者 {item.author}</span>
+                  <span>{item.gossips} 条瓜料</span>
+                  <span>{item.price} Crypo</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="guest-preview-cta">
+        <button className="auth-primary-btn" type="button" onClick={() => setIsLogin(true)}>立即登录参与</button>
+        <button className="guest-outline-btn" type="button" onClick={() => setIsLogin(false)}>创建账号开始体验</button>
+      </div>
+    </section>
+  );
+
   return (
     <div className={`app${activeTab === 'secret' ? ' secret-mode' : ''}`}>
       {loadingState && (
@@ -2286,11 +2647,14 @@ function App() {
       {!currentUser ? (
         <div className="auth">
           <h2>{isLogin ? 'Login' : 'Register'}</h2>
+          {isSupabaseEnabled && (
+            <p className="hint">已启用 Supabase Auth，请使用邮箱和密码登录。</p>
+          )}
           {isLogin ? (
             <form className="auth-form" onSubmit={handleLoginSubmit}>
               <input
-                type="text"
-                placeholder="Username"
+                type={isSupabaseEnabled ? 'email' : 'text'}
+                placeholder={isSupabaseEnabled ? 'Email' : 'Username'}
                 value={loginName}
                 onChange={(e) => setLoginName(e.target.value)}
               />
@@ -2334,6 +2698,7 @@ function App() {
               {isLogin ? 'Need to register?' : 'Already have account?'}
             </button>
           </div>
+          {renderGuestPreview()}
           <div className="auth-notice">
             <h3>用户须知：社交规范与免责声明</h3>
             <p><strong>社交规范</strong></p>
