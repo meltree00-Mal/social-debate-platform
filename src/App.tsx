@@ -1387,9 +1387,31 @@ function App() {
     );
   };
 
-  const deleteMarket = (id: number) => {
-    if (confirm('Delete this market?')) {
-      setMarkets(prev => prev.filter(m => m.id !== id));
+  const deleteMarket = async (id: number) => {
+    if (!currentUser?.isAdmin) return;
+    if (!confirm('Delete this market?')) return;
+
+    const nextMarkets = markets.filter(m => m.id !== id);
+
+    setLoadingState({
+      type: 'market',
+      title: '正在删除预测',
+      message: '正在同步删除结果，预测主页更新后会自动刷新。',
+    });
+
+    setMarkets(nextMarkets);
+
+    try {
+      const didPersist = await persistServerManagedCriticalState(
+        { markets: nextMarkets },
+        'delete_market',
+      );
+      if (!didPersist) {
+        await pullSharedState(true);
+        alert(getSyncFailureMessage('预测删除失败，已恢复最新远端数据。'));
+      }
+    } finally {
+      setLoadingState(null);
     }
   };
 
@@ -1399,12 +1421,35 @@ function App() {
     setEditDeadline(market.deadline);
   };
 
-  const saveEdit = () => {
-    if (editingMarket) {
-      setMarkets(prev => prev.map(m => m.id === editingMarket.id ? { ...m, question: editQuestion, deadline: editDeadline } : m));
-      setEditingMarket(null);
-      setEditQuestion('');
-      setEditDeadline('');
+  const saveEdit = async () => {
+    if (!editingMarket || !currentUser?.isAdmin) return;
+
+    const nextMarkets = markets.map(m => m.id === editingMarket.id
+      ? { ...m, question: editQuestion, deadline: editDeadline }
+      : m);
+
+    setLoadingState({
+      type: 'market',
+      title: '正在更新预测',
+      message: '正在同步预测修改，预测主页更新后会自动刷新。',
+    });
+
+    setMarkets(nextMarkets);
+    setEditingMarket(null);
+    setEditQuestion('');
+    setEditDeadline('');
+
+    try {
+      const didPersist = await persistServerManagedCriticalState(
+        { markets: nextMarkets },
+        'edit_market',
+      );
+      if (!didPersist) {
+        await pullSharedState(true);
+        alert(getSyncFailureMessage('预测修改失败，已恢复最新远端数据。'));
+      }
+    } finally {
+      setLoadingState(null);
     }
   };
 
