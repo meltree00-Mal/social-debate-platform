@@ -99,7 +99,43 @@ export default async function handler(req: any, res: any) {
   const table = DOC_TABLES[doc];
   const nowIso = new Date().toISOString();
 
-  // Optional dedupe/audit tables may not exist yet; best-effort only.
+    // Guard against stale-snapshot overwrites for the users table.
+    // A write that would set user count to 0 (or cut it by >50% when there are >=4 users)
+    // is almost certainly a stale-cache write from a client with empty/old localStorage.
+    if (doc === 'users') {
+      const { data: snapshotRow } = await supabase
+        .from(table)
+        .select('payload')
+        .eq('id', 1)
+        .maybeSingle();
+
+      const currentCount = Array.isArray(snapshotRow?.payload)
+        ? (snapshotRow.payload as unknown[]).length
+        : 0;
+      const nextCount = Array.isArray(payload) ? (payload as unknown[]).length : 0;
+
+      if (currentCount > 0 && nextCount === 0) {
+        json(res, 400, {
+          ok: false,
+          code: 'EMPTY_PAYLOAD',
+          version: expectedVersion,
+          updatedAt: nowIso,
+        });
+        return;
+      }
+
+      if (currentCount >= 4 && nextCount < currentCount / 2) {
+        json(res, 400, {
+          ok: false,
+          code: 'STALE_SNAPSHOT',
+          version: expectedVersion,
+          updatedAt: nowIso,
+        });
+        return;
+      }
+    }
+
+    // Optional dedupe/audit tables may not exist yet; best-effort only.
   const { error: dedupeError } = await supabase
     .from('request_dedupe')
     .insert({ request_id: requestId, doc_key: doc, user_name: userName, status: 'ok' });
