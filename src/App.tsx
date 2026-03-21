@@ -534,11 +534,11 @@ function App() {
 
     const client = supabase;
     const [usersRes, marketsRes, secretsRes, feedbacksRes, settingsRes] = await Promise.all([
-      client.from(SHARED_TABLES.users).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
-      client.from(SHARED_TABLES.markets).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
-      client.from(SHARED_TABLES.secrets).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
-      client.from(SHARED_TABLES.feedbacks).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
-      client.from(SHARED_TABLES.settings).select('payload,version,updated_at').eq('id', 1).maybeSingle(),
+        client.from(SHARED_TABLES.users).select('payload,version,updated_at').eq('id', 1).limit(1),
+        client.from(SHARED_TABLES.markets).select('payload,version,updated_at').eq('id', 1).limit(1),
+        client.from(SHARED_TABLES.secrets).select('payload,version,updated_at').eq('id', 1).limit(1),
+        client.from(SHARED_TABLES.feedbacks).select('payload,version,updated_at').eq('id', 1).limit(1),
+        client.from(SHARED_TABLES.settings).select('payload,version,updated_at').eq('id', 1).limit(1),
     ]);
 
     const responses = [usersRes, marketsRes, secretsRes, feedbacksRes, settingsRes];
@@ -547,11 +547,11 @@ function App() {
       return null;
     }
 
-    const usersDoc = usersRes.data as RemoteDocument<Partial<User>[]> | null;
-    const marketsDoc = marketsRes.data as RemoteDocument<Partial<Market>[]> | null;
-    const secretsDoc = secretsRes.data as RemoteDocument<Partial<Secret>[]> | null;
-    const feedbacksDoc = feedbacksRes.data as RemoteDocument<Feedback[]> | null;
-    const settingsDoc = settingsRes.data as RemoteDocument<SharedSettingsState> | null;
+    const usersDoc = (usersRes.data?.[0] ?? null) as RemoteDocument<Partial<User>[]> | null;
+    const marketsDoc = (marketsRes.data?.[0] ?? null) as RemoteDocument<Partial<Market>[]> | null;
+    const secretsDoc = (secretsRes.data?.[0] ?? null) as RemoteDocument<Partial<Secret>[]> | null;
+    const feedbacksDoc = (feedbacksRes.data?.[0] ?? null) as RemoteDocument<Feedback[]> | null;
+    const settingsDoc = (settingsRes.data?.[0] ?? null) as RemoteDocument<SharedSettingsState> | null;
 
     const payload: Partial<SharedAppState> = {};
 
@@ -646,15 +646,17 @@ function App() {
     const client = supabase;
     const nowIso = new Date().toISOString();
 
-    const { data: currentRow, error: currentError } = await client
+    const { data: currentRows, error: currentError } = await client
       .from(tableName)
       .select('version')
       .eq('id', 1)
-      .maybeSingle();
+      .limit(1);
 
     if (currentError) {
       return 'error';
     }
+
+    const currentRow = currentRows?.[0];
 
     const currentVersion = typeof currentRow?.version === 'number' ? currentRow.version : 0;
     const nextVersion = currentVersion + 1;
@@ -672,17 +674,19 @@ function App() {
       return 'ok';
     }
 
-    const { data: updatedRow, error: updateError } = await client
+    const { data: updatedRows, error: updateError } = await client
       .from(tableName)
       .update({ payload, version: nextVersion, updated_at: nowIso })
       .eq('id', 1)
       .eq('version', currentVersion)
       .select('version')
-      .maybeSingle();
+      .limit(1);
 
     if (updateError) {
       return 'error';
     }
+
+    const updatedRow = updatedRows?.[0];
 
     if (!updatedRow || typeof updatedRow.version !== 'number') {
       logSyncConflict(tableName, currentVersion);
